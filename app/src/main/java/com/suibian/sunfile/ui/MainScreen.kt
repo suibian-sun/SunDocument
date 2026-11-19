@@ -5,15 +5,18 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -45,40 +48,40 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderZip
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -105,8 +108,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -119,13 +122,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.suibian.sunfile.BuildConfig
 import com.suibian.sunfile.data.FileEntry
+import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.FileRepo
+import com.suibian.sunfile.data.OpenMode
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.ui.components.DrawCheck
+import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
 import com.suibian.sunfile.ui.components.RollingNumber
 import com.suibian.sunfile.ui.components.ShimmerList
+import com.suibian.sunfile.ui.components.iconOf
 import com.suibian.sunfile.ui.components.pressScale
+import com.suibian.sunfile.ui.components.tintOf
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
@@ -144,6 +152,13 @@ sealed interface Page {
     data object Files : Page
     data object Search : Page
     data object Settings : Page
+}
+
+/** 内置全屏查看器 */
+private sealed interface Viewer {
+    data class Hex(val file: File) : Viewer
+    data class Image(val file: File) : Viewer
+    data class Archive(val file: File) : Viewer
 }
 
 @Composable
@@ -177,6 +192,8 @@ fun MainScreen(
     var dialog by remember { mutableStateOf<DialogKind?>(null) }
     var editorTarget by remember { mutableStateOf<File?>(null) }
     var editorOrigin by remember { mutableStateOf(Offset.Zero) }
+    var viewer by remember { mutableStateOf<Viewer?>(null) }
+    var openWithTarget by remember { mutableStateOf<File?>(null) }
     var openFailure by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(Unit) { vm.init() }
@@ -206,17 +223,34 @@ fun MainScreen(
         vm.clearSelection()
     }
 
-    fun openEntry(entry: FileEntry, origin: Offset) {
-        if (entry.isDir) {
-            vm.navigate(entry.path)
-            return
+    fun openWith(file: File, mode: OpenMode, origin: Offset = Offset.Zero) {
+        when (mode) {
+            OpenMode.TEXT -> {
+                editorOrigin = origin
+                editorTarget = file
+            }
+            OpenMode.HEX -> viewer = Viewer.Hex(file)
+            OpenMode.IMAGE -> viewer = Viewer.Image(file)
+            OpenMode.ARCHIVE -> viewer = Viewer.Archive(file)
+            OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
-        if (FileRepo.looksLikeText(entry.file)) {
-            editorOrigin = origin
-            editorTarget = entry.file
-        } else if (!openExternally(context, entry.file)) {
-            openFailure = entry.file
+    }
+
+    fun openFile(file: File, origin: Offset) {
+        val ext = FileKinds.extensionOf(file)
+        val remembered = prefs.openWith[ext]
+        val mode = remembered ?: FileKinds.defaultMode(file)
+        if (mode == null) {
+            openWithTarget = file
+        } else {
+            openWith(file, mode, origin)
         }
+    }
+
+    fun copyPath(path: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("path", path))
+        Toast.makeText(context, "路径已复制", Toast.LENGTH_SHORT).show()
     }
 
     ModalNavigationDrawer(
@@ -228,9 +262,14 @@ fun MainScreen(
                 version = BuildConfig.VERSION_NAME,
                 storageUsed = storage?.used ?: 0L,
                 storageTotal = storage?.total ?: 0L,
+                bookmarks = prefs.bookmarks,
                 onNavigate = { path ->
                     vm.navigate(path)
                     page = Page.Files
+                    scope.launch { drawerState.close() }
+                },
+                onBookmarks = {
+                    sheet = SheetKind.Bookmarks
                     scope.launch { drawerState.close() }
                 },
                 onSettings = { page = Page.Settings; scope.launch { drawerState.close() } },
@@ -261,46 +300,67 @@ fun MainScreen(
             ) { target ->
                 when (target) {
                     Page.Files -> FilesPage(
-                        pane = pane,
                         panes = panes,
                         active = active,
                         hasAccess = hasAccess,
                         storageUsed = storage?.used ?: 0L,
                         storageTotal = storage?.total ?: 0L,
                         clipboardCount = clipboard.paths.size,
+                        bookmarks = prefs.bookmarks,
+                        showHidden = prefs.showHidden,
+                        overflowOpen = overflowOpen,
+                        drawerOpen = drawerState.isOpen,
                         onRequestAccess = onRequestAccess,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        overflowOpen = overflowOpen,
-                        showHidden = prefs.showHidden,
-                        drawerOpen = drawerState.isOpen,
                         onOverflowChange = { overflowOpen = it },
-                        onRefresh = { vm.refresh() },
-                        onSearch = { vm.openSearch(); page = Page.Search },
-                        onSort = { sheet = SheetKind.Sort },
-                        onSelectAll = { vm.selectAll() },
-                        onToggleHidden = { vm.toggleHidden() },
-                        onSwap = { vm.swapPanes() },
-                        onSettings = { page = Page.Settings },
-                        onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
-                        onPaste = { vm.paste() },
-                        onProperties = {
-                            pane.selected.firstOrNull()?.let { dialog = DialogKind.Properties(File(it)) }
-                        },
+                        onActivate = { vm.setActive(it) },
                         onPathClick = { sheet = SheetKind.Path },
-                        onOpenEntry = { entry, origin -> openEntry(entry, origin) },
-                        onLongPress = { entry -> vm.toggleSelect(entry) },
+                        onOpenEntry = { index, entry, origin ->
+                            vm.setActive(index)
+                            if (entry.isDir) {
+                                vm.navigate(entry.path)
+                            } else {
+                                openFile(entry.file, origin)
+                            }
+                        },
+                        onLongPress = { index, entry ->
+                            vm.setActive(index)
+                            vm.toggleSelect(entry)
+                        },
                         onEntryMore = { sheet = SheetKind.Entry(it) },
+                        onUp = { index -> vm.goUp(index) },
+                        onRefresh = { index -> vm.refreshPane(index) },
+                        onToggleBookmark = { path -> vm.toggleBookmark(path) },
                         onBack = { vm.goBack() },
                         onForward = { vm.goForward() },
-                        onUp = { vm.goUp() },
                         onNew = { sheet = SheetKind.New },
+                        onSwap = { vm.swapPanes() },
                         onSelectionCopy = { vm.setClipboard(false) },
                         onSelectionCut = { vm.setClipboard(true) },
                         onSelectionDelete = { dialog = DialogKind.Delete(pane.selected.toList()) },
                         onSelectionRename = {
-                            pane.selected.firstOrNull()?.let { dialog = DialogKind.Rename(File(it)) }
+                            pane.selected.singleOrNull()?.let { dialog = DialogKind.Rename(File(it)) }
                         },
-                        onClearSelection = { vm.clearSelection() }
+                        onClearSelection = { vm.clearSelection() },
+                        // 顶栏工具
+                        onRefreshActive = { vm.refresh() },
+                        onSearch = { vm.openSearch(); page = Page.Search },
+                        onSort = { sheet = SheetKind.Sort },
+                        onSelectAll = { vm.selectAll() },
+                        onInvertSelection = { vm.invertSelection() },
+                        onToggleHidden = { vm.toggleHidden() },
+                        onSettings = { page = Page.Settings },
+                        onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
+                        onPaste = { vm.paste() },
+                        onProperties = {
+                            pane.selected.singleOrNull()?.let { dialog = DialogKind.Properties(File(it)) }
+                        },
+                        onCompressSelection = { dialog = DialogKind.Compress(pane.selected.toList()) },
+                        onBatchRename = { dialog = DialogKind.BatchRename(pane.selected.toList()) },
+                        onChecksum = {
+                            pane.selected.singleOrNull()?.let { dialog = DialogKind.Checksum(File(it)) }
+                        },
+                        onBookmarks = { sheet = SheetKind.Bookmarks }
                     )
 
                     Page.Search -> SearchPage(
@@ -324,21 +384,22 @@ fun MainScreen(
                         onToggleAutoCheck = { vm.toggleAutoCheck() },
                         onToggleAccelerator = { vm.toggleAccelerator() },
                         onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
+                        onEditorPrefs = { size, wrap, lines -> vm.setEditorPrefs(size, wrap, lines) },
+                        onClearOpenWith = { vm.prefsStore.clearOpenWith() },
                         onAbout = { dialog = DialogKind.About }
                     )
                 }
             }
 
-            // 进度浮层
             busy?.let { op ->
-                BusyBar(op = op, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 76.dp))
+                BusyBar(op = op, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp))
             }
 
             SnackbarHost(
                 hostState = snackbarHost,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 78.dp, start = 12.dp, end = 12.dp)
+                    .padding(bottom = 74.dp, start = 12.dp, end = 12.dp)
             )
         }
     }
@@ -361,26 +422,31 @@ fun MainScreen(
 
         is SheetKind.Entry -> EntrySheet(
             entry = s.entry,
+            bookmarked = prefs.bookmarks.contains(if (s.entry.isDir) s.entry.path else (s.entry.file.parent ?: s.entry.path)),
             onDismiss = { sheet = null },
             onOpen = {
                 sheet = null
-                openEntry(s.entry, Offset.Zero)
+                if (s.entry.isDir) vm.navigate(s.entry.path) else openFile(s.entry.file, Offset.Zero)
             },
-            onOpenText = {
+            onOpenWith = {
                 sheet = null
-                editorOrigin = Offset.Zero
-                editorTarget = s.entry.file
-            },
-            onOpenExternal = {
-                sheet = null
-                if (!openExternally(context, s.entry.file)) openFailure = s.entry.file
+                openWithTarget = s.entry.file
             },
             onRename = { sheet = null; dialog = DialogKind.Rename(s.entry.file) },
             onProperties = { sheet = null; dialog = DialogKind.Properties(s.entry.file) },
             onCopyPath = {
-                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("path", s.entry.path))
-                Toast.makeText(context, "路径已复制", Toast.LENGTH_SHORT).show()
+                copyPath(s.entry.path)
+                sheet = null
+            },
+            onShare = {
+                sheet = null
+                if (!shareFile(context, s.entry.file)) {
+                    Toast.makeText(context, "分享失败", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onCompress = { sheet = null; dialog = DialogKind.Compress(listOf(s.entry.path)) },
+            onBookmark = {
+                vm.toggleBookmark(if (s.entry.isDir) s.entry.path else (s.entry.file.parent ?: s.entry.path))
                 sheet = null
             },
             onDelete = { sheet = null; dialog = DialogKind.Delete(listOf(s.entry.path)) }
@@ -388,11 +454,53 @@ fun MainScreen(
 
         is SheetKind.Path -> PathSheet(
             current = pane.path,
+            bookmarks = prefs.bookmarks,
             onDismiss = { sheet = null },
             onGo = { path -> sheet = null; vm.navigate(path) }
         )
 
+        is SheetKind.Bookmarks -> BookmarkSheet(
+            bookmarks = prefs.bookmarks,
+            current = pane.path,
+            onDismiss = { sheet = null },
+            onGo = { path -> sheet = null; vm.navigate(path) },
+            onRemove = { path -> vm.prefsStore.removeBookmark(path) }
+        )
+
+        is SheetKind.OpenWith -> OpenWithSheet(
+            file = s.file,
+            remembered = prefs.openWith[FileKinds.extensionOf(s.file)],
+            onDismiss = { sheet = null },
+            onPick = { mode ->
+                sheet = null
+                openWith(s.file, mode)
+            },
+            onPickAndRemember = { mode ->
+                vm.prefsStore.setOpenWith(FileKinds.extensionOf(s.file), mode)
+                sheet = null
+                openWith(s.file, mode)
+            }
+        )
+
         null -> Unit
+    }
+
+    // 未知类型默认弹出打开方式
+    openWithTarget?.let { file ->
+        OpenWithSheet(
+            file = file,
+            remembered = prefs.openWith[FileKinds.extensionOf(file)],
+            onDismiss = { openWithTarget = null },
+            onPick = { mode ->
+                openWithTarget = null
+                openWith(file, mode)
+            },
+            onPickAndRemember = { mode ->
+                vm.prefsStore.setOpenWith(FileKinds.extensionOf(file), mode)
+                openWithTarget = null
+                openWith(file, mode)
+            }
+        )
     }
 
     // ---------------- 对话框 ----------------
@@ -430,7 +538,12 @@ fun MainScreen(
             onDismiss = { dialog = null },
             onConfirm = { name ->
                 dialog = null
-                vm.create(false, name)
+                vm.create(false, name) { file ->
+                    if (file != null && FileRepo.looksLikeText(file)) {
+                        editorOrigin = Offset.Zero
+                        editorTarget = file
+                    }
+                }
             }
         )
 
@@ -453,6 +566,30 @@ fun MainScreen(
             onDismiss = { dialog = null }
         )
 
+        is DialogKind.Compress -> CompressDialog(
+            paths = d.paths,
+            onConfirm = { name ->
+                dialog = null
+                vm.compress(d.paths, name)
+            },
+            onDismiss = { dialog = null }
+        )
+
+        is DialogKind.BatchRename -> BatchRenameDialog(
+            paths = d.paths,
+            onConfirm = { find, replace ->
+                dialog = null
+                vm.renameBatch(d.paths, find, replace)
+            },
+            onDismiss = { dialog = null }
+        )
+
+        is DialogKind.Checksum -> ChecksumDialog(
+            file = d.file,
+            loader = { f, algo -> vm.checksumOf(f, algo) },
+            onDismiss = { dialog = null }
+        )
+
         DialogKind.About -> AboutDialog(
             version = BuildConfig.VERSION_NAME,
             onDismiss = { dialog = null },
@@ -467,17 +604,22 @@ fun MainScreen(
 
     // 无法用系统应用打开时的兜底
     openFailure?.let { file ->
-        ConfirmDialog(
-            title = "没有可用的打开方式",
-            message = "系统里没有能打开 ${file.name} 的应用，可以用内置文本编辑器查看。",
-            confirmText = "用文本打开",
-            onDismiss = { openFailure = null },
-            onConfirm = {
-                openFailure = null
-                editorOrigin = Offset.Zero
-                editorTarget = file
-            }
-        )
+        if (openWithTarget == null) {
+            OpenWithSheet(
+                file = file,
+                remembered = prefs.openWith[FileKinds.extensionOf(file)],
+                onDismiss = { openFailure = null },
+                onPick = { mode ->
+                    openFailure = null
+                    openWith(file, mode)
+                },
+                onPickAndRemember = { mode ->
+                    vm.prefsStore.setOpenWith(FileKinds.extensionOf(file), mode)
+                    openFailure = null
+                    openWith(file, mode)
+                }
+            )
+        }
     }
 
     // 更新弹窗
@@ -497,17 +639,40 @@ fun MainScreen(
         }
     }
 
-    // 编辑器浮层（圆形扩散）
+    // 编辑器
     editorTarget?.let { file ->
         EditorOverlay(
             file = file,
             origin = editorOrigin,
             vm = editorVm,
+            prefs = prefs,
+            onEditorPrefs = { size, wrap, lines -> vm.setEditorPrefs(size, wrap, lines) },
+            onOpenHex = { f ->
+                editorVm.reset()
+                editorTarget = null
+                viewer = Viewer.Hex(f)
+            },
             onClose = {
                 editorTarget = null
-                vm.refresh()
+                vm.refreshAll()
             }
         )
+    }
+
+    // 查看器
+    when (val v = viewer) {
+        is Viewer.Hex -> HexViewerOverlay(v.file) { viewer = null }
+        is Viewer.Image -> ImageViewerOverlay(v.file) { viewer = null }
+        is Viewer.Archive -> ArchiveOverlay(
+            file = v.file,
+            onClose = { viewer = null },
+            onExtractAll = {
+                val dest = panes[active].currentDir
+                viewer = null
+                vm.extractArchive(v.file, dest)
+            }
+        )
+        null -> Unit
     }
 }
 
@@ -515,43 +680,52 @@ fun MainScreen(
 
 @Composable
 private fun FilesPage(
-    pane: PaneState,
     panes: List<PaneState>,
     active: Int,
     hasAccess: Boolean,
     storageUsed: Long,
     storageTotal: Long,
     clipboardCount: Int,
+    bookmarks: List<String>,
+    showHidden: Boolean,
+    overflowOpen: Boolean,
+    drawerOpen: Boolean,
     onRequestAccess: () -> Unit,
     onOpenDrawer: () -> Unit,
-    overflowOpen: Boolean,
-    showHidden: Boolean,
-    drawerOpen: Boolean,
     onOverflowChange: (Boolean) -> Unit,
-    onRefresh: () -> Unit,
-    onSearch: () -> Unit,
-    onSort: () -> Unit,
-    onSelectAll: () -> Unit,
-    onToggleHidden: () -> Unit,
-    onSwap: () -> Unit,
-    onSettings: () -> Unit,
-    onCheckUpdate: () -> Unit,
-    onPaste: () -> Unit,
-    onProperties: () -> Unit,
+    onActivate: (Int) -> Unit,
     onPathClick: () -> Unit,
-    onOpenEntry: (FileEntry, Offset) -> Unit,
-    onLongPress: (FileEntry) -> Unit,
+    onOpenEntry: (Int, FileEntry, Offset) -> Unit,
+    onLongPress: (Int, FileEntry) -> Unit,
     onEntryMore: (FileEntry) -> Unit,
+    onUp: (Int) -> Unit,
+    onRefresh: (Int) -> Unit,
+    onToggleBookmark: (String) -> Unit,
     onBack: () -> Unit,
     onForward: () -> Unit,
-    onUp: () -> Unit,
     onNew: () -> Unit,
+    onSwap: () -> Unit,
     onSelectionCopy: () -> Unit,
     onSelectionCut: () -> Unit,
     onSelectionDelete: () -> Unit,
     onSelectionRename: () -> Unit,
-    onClearSelection: () -> Unit
+    onClearSelection: () -> Unit,
+    onRefreshActive: () -> Unit,
+    onSearch: () -> Unit,
+    onSort: () -> Unit,
+    onSelectAll: () -> Unit,
+    onInvertSelection: () -> Unit,
+    onToggleHidden: () -> Unit,
+    onSettings: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onPaste: () -> Unit,
+    onProperties: () -> Unit,
+    onCompressSelection: () -> Unit,
+    onBatchRename: () -> Unit,
+    onChecksum: () -> Unit,
+    onBookmarks: () -> Unit
 ) {
+    val pane = panes[active]
     Column(
         Modifier
             .fillMaxSize()
@@ -560,40 +734,65 @@ private fun FilesPage(
     ) {
         TopBar(
             pane = pane,
-            paneIndex = active,
             storageUsed = storageUsed,
             storageTotal = storageTotal,
             overflowOpen = overflowOpen,
             showHidden = showHidden,
             drawerOpen = drawerOpen,
+            clipboardCount = clipboardCount,
             onOverflowChange = onOverflowChange,
             onOpenDrawer = onOpenDrawer,
             onPathClick = onPathClick,
-            onRefresh = onRefresh,
+            onRefresh = onRefreshActive,
             onSearch = onSearch,
             onSort = onSort,
             onSelectAll = onSelectAll,
+            onInvertSelection = onInvertSelection,
             onToggleHidden = onToggleHidden,
             onSwap = onSwap,
             onSettings = onSettings,
             onCheckUpdate = onCheckUpdate,
             onPaste = onPaste,
             onProperties = onProperties,
-            clipboardCount = clipboardCount
+            onCompress = onCompressSelection,
+            onBatchRename = onBatchRename,
+            onChecksum = onChecksum,
+            onBookmarks = onBookmarks
         )
 
-        if (!hasAccess) {
-            GrantBanner(onRequestAccess)
-        }
+        if (!hasAccess) GrantBanner(onRequestAccess)
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            FileList(
-                pane = pane,
-                showSkeleton = (pane.loading || pane.path.isEmpty()) && pane.entries.isEmpty(),
-                onOpen = onOpenEntry,
-                onLongPress = onLongPress,
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            PaneView(
+                index = 0,
+                pane = panes[0],
+                active = active == 0,
+                bookmarked = bookmarks.contains(panes[0].path),
+                modifier = Modifier.weight(1f),
+                onActivate = { onActivate(0) },
+                onOpen = { entry, origin -> onOpenEntry(0, entry, origin) },
+                onLongPress = { onLongPress(0, it) },
                 onMore = onEntryMore,
-                onRetry = onRefresh
+                onUp = { onUp(0) },
+                onPathClick = { onActivate(0); onPathClick() },
+                onRefresh = { onRefresh(0) },
+                onToggleBookmark = { onToggleBookmark(panes[0].path) }
+            )
+            PaneDivider(active = active == 0)
+            PaneView(
+                index = 1,
+                pane = panes[1],
+                active = active == 1,
+                bookmarked = bookmarks.contains(panes[1].path),
+                modifier = Modifier.weight(1f),
+                onActivate = { onActivate(1) },
+                onOpen = { entry, origin -> onOpenEntry(1, entry, origin) },
+                onLongPress = { onLongPress(1, it) },
+                onMore = onEntryMore,
+                onUp = { onUp(1) },
+                onPathClick = { onActivate(1); onPathClick() },
+                onRefresh = { onRefresh(1) },
+                onToggleBookmark = { onToggleBookmark(panes[1].path) }
             )
         }
 
@@ -607,7 +806,7 @@ private fun FilesPage(
             onForward = onForward,
             onNew = onNew,
             onSwap = onSwap,
-            onUp = onUp,
+            onUp = { onUp(active) },
             onCopy = onSelectionCopy,
             onCut = onSelectionCut,
             onDelete = onSelectionDelete,
@@ -617,15 +816,17 @@ private fun FilesPage(
     }
 }
 
+// ---------------- 顶栏 ----------------
+
 @Composable
 private fun TopBar(
     pane: PaneState,
-    paneIndex: Int,
     storageUsed: Long,
     storageTotal: Long,
     overflowOpen: Boolean,
     showHidden: Boolean,
     drawerOpen: Boolean,
+    clipboardCount: Int,
     onOverflowChange: (Boolean) -> Unit,
     onOpenDrawer: () -> Unit,
     onPathClick: () -> Unit,
@@ -633,29 +834,33 @@ private fun TopBar(
     onSearch: () -> Unit,
     onSort: () -> Unit,
     onSelectAll: () -> Unit,
+    onInvertSelection: () -> Unit,
     onToggleHidden: () -> Unit,
     onSwap: () -> Unit,
     onSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
     onPaste: () -> Unit,
     onProperties: () -> Unit,
-    clipboardCount: Int
+    onCompress: () -> Unit,
+    onBatchRename: () -> Unit,
+    onChecksum: () -> Unit,
+    onBookmarks: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
-            .height(62.dp)
+            .height(58.dp)
             .background(SunColors.Surface1)
-            .padding(start = 4.dp, end = 4.dp),
+            .padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
             onClick = onOpenDrawer,
             interactionSource = interaction,
-            modifier = Modifier.size(44.dp).pressScale(interaction, 0.88f)
+            modifier = Modifier.size(42.dp).pressScale(interaction, 0.88f)
         ) {
-            HamburgerIcon(open = drawerOpen, tint = SunColors.TextSecondary, modifier = Modifier.size(21.dp))
+            HamburgerIcon(open = drawerOpen, tint = SunColors.TextSecondary, modifier = Modifier.size(20.dp))
         }
 
         Column(
@@ -663,28 +868,20 @@ private fun TopBar(
                 .weight(1f)
                 .clip(SunShapes.Small)
                 .clickable { onPathClick() }
-                .padding(horizontal = 2.dp, vertical = 4.dp)
+                .padding(horizontal = 2.dp, vertical = 3.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(15.dp)
-                        .clip(CircleShape)
-                        .background(if (paneIndex == 0) SunColors.AccentSoft else Color(0x33D9A93F)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (paneIndex == 0) "A" else "B",
-                        color = if (paneIndex == 0) SunColors.Accent else SunColors.Folder,
-                        fontSize = 8.5.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
+            AnimatedContent(
+                targetState = pane.path,
+                transitionSpec = {
+                    (fadeIn(tween(Motion.Base)) + slideInVertically(tween(Motion.Base)) { it / 3 }) togetherWith
+                        fadeOut(tween(Motion.Fast))
+                },
+                label = "path"
+            ) { path ->
                 Text(
-                    text = compactPath(pane.path),
+                    path.ifEmpty { "/" },
                     color = SunColors.TextPrimary,
-                    fontSize = 11.5.sp,
+                    fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -693,13 +890,13 @@ private fun TopBar(
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RollingNumber(pane.dirCount, NumberStyle, SunColors.TextTertiary)
-                Text(" 个文件夹", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
-                Text("  ·  ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Text(" 文件夹", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Text(" · ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
                 RollingNumber(pane.fileCount, NumberStyle, SunColors.TextTertiary)
-                Text(" 个文件", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
-                Text("  ·  ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Text(" 文件", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Text(" · ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
                 Text(
-                    "${Fmt.size(storageUsed)} / ${Fmt.size(storageTotal)}",
+                    Fmt.sizePair(storageUsed, storageTotal),
                     style = NumberStyle,
                     color = SunColors.TextTertiary,
                     maxLines = 1
@@ -708,12 +905,9 @@ private fun TopBar(
         }
 
         Box {
-            IconButton(
-                onClick = { onOverflowChange(true) },
-                modifier = Modifier.size(44.dp)
-            ) {
+            IconButton(onClick = { onOverflowChange(true) }, modifier = Modifier.size(42.dp)) {
                 Icon(
-                    Icons.Default.MoreVert,
+                    Icons.Outlined.MoreVert,
                     contentDescription = "工具栏",
                     tint = SunColors.TextSecondary,
                     modifier = Modifier.size(20.dp)
@@ -725,42 +919,61 @@ private fun TopBar(
                 modifier = Modifier.background(SunColors.Surface4, SunShapes.Medium),
                 offset = androidx.compose.ui.unit.DpOffset(0.dp, 6.dp)
             ) {
-                ToolMenuItem(Icons.Default.Refresh, "刷新", "重新读取当前目录") {
+                ToolMenuItem(Icons.Outlined.Refresh, "刷新", "重新读取当前窗口") {
                     onOverflowChange(false); onRefresh()
                 }
-                ToolMenuItem(Icons.Default.Search, "搜索", "在当前目录下递归搜索") {
+                ToolMenuItem(Icons.Outlined.Search, "搜索", "在当前目录递归查找") {
                     onOverflowChange(false); onSearch()
                 }
-                ToolMenuItem(Icons.Default.Sort, "排序", "名称 / 大小 / 时间 / 类型") {
+                ToolMenuItem(Icons.Outlined.Sort, "排序", "${pane.entries.size} 项") {
                     onOverflowChange(false); onSort()
                 }
-                ToolMenuItem(Icons.Default.SelectAll, "全选", "${pane.entries.size} 项") {
+                ToolMenuItem(Icons.Outlined.SelectAll, "全选", null) {
                     onOverflowChange(false); onSelectAll()
                 }
+                ToolMenuItem(Icons.Outlined.SelectAll, "反选", null) {
+                    onOverflowChange(false); onInvertSelection()
+                }
                 ToolMenuItem(
-                    if (showHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    if (showHidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                     if (showHidden) "隐藏隐藏文件" else "显示隐藏文件",
-                    "以 . 开头的文件"
+                    "以 . 开头"
                 ) {
                     onOverflowChange(false); onToggleHidden()
                 }
-                ToolMenuItem(Icons.Default.SwapHoriz, "交换窗口", "A ⇄ B") {
+                ToolMenuItem(Icons.Outlined.SwapHoriz, "交换窗口", "A ⇄ B") {
                     onOverflowChange(false); onSwap()
                 }
                 if (clipboardCount > 0) {
-                    ToolMenuItem(Icons.Default.ContentPaste, "粘贴", "剪贴板 $clipboardCount 项") {
+                    ToolMenuItem(Icons.Outlined.ContentPaste, "粘贴", "剪贴板 $clipboardCount 项") {
                         onOverflowChange(false); onPaste()
                     }
                 }
+                ToolMenuItem(Icons.Outlined.BookmarkBorder, "收藏夹", null) {
+                    onOverflowChange(false); onBookmarks()
+                }
                 if (pane.selected.size == 1) {
-                    ToolMenuItem(Icons.Default.Info, "属性", "查看详情") {
+                    ToolMenuItem(Icons.Outlined.Info, "属性", "查看详情") {
                         onOverflowChange(false); onProperties()
                     }
+                    ToolMenuItem(Icons.Outlined.Fingerprint, "校验和", "SHA-256 / MD5") {
+                        onOverflowChange(false); onChecksum()
+                    }
                 }
-                ToolMenuItem(Icons.Default.Settings, "设置", null) {
+                if (pane.selected.isNotEmpty()) {
+                    ToolMenuItem(Icons.Outlined.Archive, "压缩为 ZIP", "${pane.selected.size} 项") {
+                        onOverflowChange(false); onCompress()
+                    }
+                }
+                if (pane.selected.size > 1) {
+                    ToolMenuItem(Icons.Outlined.DriveFileRenameOutline, "批量重命名", "${pane.selected.size} 项") {
+                        onOverflowChange(false); onBatchRename()
+                    }
+                }
+                ToolMenuItem(Icons.Outlined.Settings, "设置", null) {
                     onOverflowChange(false); onSettings()
                 }
-                ToolMenuItem(Icons.Default.SystemUpdate, "检查更新", "当前 v${BuildConfig.VERSION_NAME}") {
+                ToolMenuItem(Icons.Outlined.SystemUpdate, "检查更新", "当前 v${BuildConfig.VERSION_NAME}") {
                     onOverflowChange(false); onCheckUpdate()
                 }
             }
@@ -798,13 +1011,13 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .background(Color(0xFF241D10))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             "未获得全部文件访问权限，部分目录不可读写",
             color = SunColors.Warning,
-            fontSize = 10.5.sp,
+            fontSize = 10.sp,
             modifier = Modifier.weight(1f)
         )
         Text(
@@ -820,73 +1033,268 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
     }
 }
 
-// ---------------- 文件列表 ----------------
+// ---------------- 单栏 ----------------
 
 @Composable
-private fun FileList(
+private fun PaneDivider(active: Boolean) {
+    val color by animateColorAsState(
+        targetValue = if (active) SunColors.Accent.copy(alpha = 0.55f) else SunColors.Hairline,
+        animationSpec = tween(Motion.Base),
+        label = "divider"
+    )
+    Box(Modifier.width(1.dp).fillMaxHeight().background(color))
+}
+
+@Composable
+private fun PaneView(
+    index: Int,
     pane: PaneState,
-    showSkeleton: Boolean,
+    active: Boolean,
+    bookmarked: Boolean,
+    modifier: Modifier = Modifier,
+    onActivate: () -> Unit,
     onOpen: (FileEntry, Offset) -> Unit,
     onLongPress: (FileEntry) -> Unit,
     onMore: (FileEntry) -> Unit,
-    onRetry: () -> Unit
+    onUp: () -> Unit,
+    onPathClick: () -> Unit,
+    onRefresh: () -> Unit,
+    onToggleBookmark: () -> Unit
+) {
+    val bg by animateColorAsState(
+        targetValue = if (active) SunColors.Surface1.copy(alpha = 0.55f) else SunColors.Bg,
+        animationSpec = tween(Motion.Base),
+        label = "paneBg"
+    )
+    val accentAlpha by animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = tween(Motion.Base),
+        label = "paneAccent"
+    )
+
+    Column(
+        modifier
+            .fillMaxHeight()
+            .background(bg)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onActivate() }
+    ) {
+        // 激活指示线
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.5.dp)
+                .background(SunColors.Accent.copy(alpha = 0.75f * accentAlpha))
+        )
+
+        // 栏头：A/B + 路径 + 收藏
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .padding(start = 8.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(15.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) SunColors.AccentSoft else SunColors.Surface3),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (index == 0) "A" else "B",
+                    color = if (active) SunColors.Accent else SunColors.TextTertiary,
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            Spacer(Modifier.width(5.dp))
+            Text(
+                compactPath(pane.path).ifEmpty { "/" },
+                color = if (active) SunColors.TextSecondary else SunColors.TextTertiary,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(SunShapes.Small)
+                    .clickable { onActivate(); onPathClick() }
+                    .padding(vertical = 4.dp)
+            )
+            IconButton(onClick = onToggleBookmark, modifier = Modifier.size(26.dp)) {
+                Icon(
+                    if (bookmarked) Icons.Outlined.Star else Icons.Outlined.BookmarkBorder,
+                    "收藏",
+                    tint = if (bookmarked) SunColors.Folder else SunColors.TextTertiary,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+
+        // 固定的「..」上级目录行
+        UpRow(enabled = pane.canUp, onClick = { onActivate(); if (pane.canUp) onUp() })
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            PaneList(
+                pane = pane,
+                onOpen = { entry, origin -> onActivate(); onOpen(entry, origin) },
+                onLongPress = { onActivate(); onLongPress(it) },
+                onMore = { onActivate(); onMore(it) },
+                onRetry = { onActivate(); onRefresh() },
+                onUp = { onActivate(); onUp() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(38.dp)
+            .background(SunColors.Surface2.copy(alpha = 0.5f))
+            .pressScale(interaction, 0.99f)
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                enabled = enabled
+            ) { onClick() }
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FolderDotsIcon(
+            tint = if (enabled) SunColors.Folder else SunColors.Folder.copy(alpha = 0.35f),
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            "..",
+            color = if (enabled) SunColors.TextSecondary else SunColors.TextTertiary.copy(alpha = 0.5f),
+            fontSize = 11.5.sp,
+            fontFamily = FontFamily.Monospace
+        )
+        Spacer(Modifier.width(6.dp))
+        Text("上一级", color = SunColors.TextTertiary.copy(alpha = 0.6f), fontSize = 9.sp)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PaneList(
+    pane: PaneState,
+    onOpen: (FileEntry, Offset) -> Unit,
+    onLongPress: (FileEntry) -> Unit,
+    onMore: (FileEntry) -> Unit,
+    onRetry: () -> Unit,
+    onUp: () -> Unit
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(pane.token) { if (pane.entries.isNotEmpty()) listState.scrollToItem(0) }
 
-    when {
-        showSkeleton -> ShimmerList()
+    AnimatedContent(
+        targetState = pane.path,
+        transitionSpec = {
+            (fadeIn(tween(Motion.Base)) + slideInVertically(tween(Motion.Slow, easing = Motion.EaseOut)) { it / 26 }) togetherWith
+                fadeOut(tween(Motion.Fast))
+        },
+        label = "paneList"
+    ) { targetPath ->
+        androidx.compose.runtime.key(targetPath) {
+        when {
+            (pane.loading || pane.path.isEmpty()) && pane.entries.isEmpty() -> ShimmerList(rows = 7)
 
-        pane.error != null && pane.entries.isEmpty() -> Column(
-            Modifier.fillMaxSize().padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text("打不开这个目录", color = SunColors.TextSecondary, fontSize = 13.sp)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                pane.error,
-                color = SunColors.TextTertiary,
-                fontSize = 10.5.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.widthIn(max = 300.dp)
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "重试",
-                color = SunColors.Accent,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .clip(SunShapes.Small)
-                    .clickable { onRetry() }
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            )
-        }
+            pane.notice != null && pane.entries.isEmpty() -> Column(
+                Modifier.fillMaxSize().padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(38.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("此目录不可访问", color = SunColors.TextSecondary, fontSize = 11.5.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    pane.notice ?: "",
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(Modifier.height(10.dp))
+                Row {
+                    Text(
+                        "返回上级",
+                        color = SunColors.Accent,
+                        fontSize = 10.5.sp,
+                        modifier = Modifier
+                            .clip(SunShapes.Small)
+                            .clickable { onUp() }
+                            .padding(horizontal = 9.dp, vertical = 6.dp)
+                    )
+                }
+            }
 
-        pane.entries.isEmpty() -> Column(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(52.dp))
-            Spacer(Modifier.height(10.dp))
-            Text("这个文件夹是空的", color = SunColors.TextTertiary, fontSize = 11.5.sp)
-        }
-
-        else -> LazyColumn(
-            state = listState,
-            contentPadding = PaddingValues(bottom = 10.dp)
-        ) {
-            items(pane.entries, key = { it.path }) { entry ->
-                FileRow(
-                    entry = entry,
-                    selected = pane.selected.contains(entry.path),
-                    selectionMode = pane.selectionMode,
-                    onClick = { origin -> onOpen(entry, origin) },
-                    onLongClick = { onLongPress(entry) },
-                    onMore = { onMore(entry) }
+            pane.error != null && pane.entries.isEmpty() -> Column(
+                Modifier.fillMaxSize().padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("打不开这个目录", color = SunColors.TextSecondary, fontSize = 11.5.sp)
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    pane.error ?: "",
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "重试",
+                    color = SunColors.Accent,
+                    fontSize = 10.5.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { onRetry() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
+
+            pane.entries.isEmpty() -> Column(
+                Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(36.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("空文件夹", color = SunColors.TextTertiary, fontSize = 10.5.sp)
+            }
+
+            else -> LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(bottom = 8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(pane.entries, key = { it.path }) { entry ->
+                    FileRow(
+                        modifier = Modifier.animateItemPlacement(),
+                        entry = entry,
+                        selected = pane.selected.contains(entry.path),
+                        selectionMode = pane.selectionMode,
+                        onClick = { origin ->
+                            if (pane.selectionMode) onLongPress(entry) else onOpen(entry, origin)
+                        },
+                        onLongClick = { onLongPress(entry) },
+                        onMore = { onMore(entry) }
+                    )
+                }
+            }
+        }
         }
     }
 }
@@ -894,6 +1302,7 @@ private fun FileList(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(
+    modifier: Modifier = Modifier,
     entry: FileEntry,
     selected: Boolean,
     selectionMode: Boolean,
@@ -903,18 +1312,19 @@ private fun FileRow(
 ) {
     val interaction = remember { MutableInteractionSource() }
     var rowOrigin by remember { mutableStateOf(Offset.Zero) }
-    val bg = when {
-        selected -> SunColors.AccentSoft
-        else -> Color.Transparent
-    }
+    val bg by animateColorAsState(
+        targetValue = if (selected) SunColors.AccentSoft else Color.Transparent,
+        animationSpec = tween(Motion.Fast),
+        label = "rowBg"
+    )
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(48.dp)
             .background(bg)
             .onGloballyPositioned { coords ->
                 val pos = coords.localToRoot(Offset.Zero)
-                rowOrigin = Offset(pos.x + 60f, pos.y + coords.size.height / 2f)
+                rowOrigin = Offset(pos.x + 40f, pos.y + coords.size.height / 2f)
             }
             .pressScale(interaction, 0.985f)
             .combinedClickable(
@@ -923,93 +1333,61 @@ private fun FileRow(
                 onLongClick = onLongClick,
                 onClick = { onClick(rowOrigin) }
             )
-            .padding(start = 14.dp, end = 4.dp),
+            .padding(start = 9.dp, end = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(iconBg(entry)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = iconOf(entry),
-                contentDescription = null,
-                tint = iconTint(entry),
-                modifier = Modifier.size(17.dp)
-            )
-        }
-        Spacer(Modifier.width(12.dp))
+        Icon(
+            imageVector = iconOf(entry.file, entry.isDir),
+            contentDescription = null,
+            tint = tintOf(entry.file, entry.isDir).let { if (entry.canRead) it else it.copy(alpha = 0.4f) },
+            modifier = Modifier.size(19.dp)
+        )
+        Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 entry.name,
-                color = if (selected) SunColors.Accent else SunColors.TextPrimary,
-                fontSize = 13.sp,
+                color = when {
+                    selected -> SunColors.Accent
+                    !entry.canRead -> SunColors.TextTertiary
+                    else -> SunColors.TextPrimary
+                },
+                fontSize = 11.5.sp,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (entry.isDir) "文件夹" else Fmt.size(entry.size),
-                    style = NumberStyle,
-                    color = SunColors.TextTertiary
-                )
-                Text("  ·  ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
-                Text(
-                    Fmt.time(entry.lastModified),
-                    color = SunColors.TextTertiary,
-                    fontSize = 9.5.sp
-                )
-            }
+            Spacer(Modifier.height(1.dp))
+            Text(
+                if (entry.isDir) {
+                    "文件夹 · " + Fmt.timeShort(entry.lastModified)
+                } else {
+                    Fmt.size(entry.size) + " · " + Fmt.timeShort(entry.lastModified)
+                },
+                color = SunColors.TextTertiary,
+                fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         if (selectionMode) {
             DrawCheck(
                 checked = selected,
-                modifier = Modifier.size(21.dp).padding(end = 0.dp),
+                modifier = Modifier.size(18.dp).padding(end = 2.dp),
                 background = SunColors.Accent
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(5.dp))
         } else {
-            IconButton(onClick = onMore, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onMore, modifier = Modifier.size(28.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = "更多",
                     tint = SunColors.TextTertiary,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }
     }
-}
-
-private fun iconOf(entry: FileEntry): ImageVector {
-    if (entry.isDir) return Icons.Default.Folder
-    return when (entry.name.substringAfterLast('.', "").lowercase()) {
-        "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic" -> Icons.Default.Image
-        "mp3", "flac", "wav", "ogg", "m4a", "aac" -> Icons.Default.Audiotrack
-        "mp4", "mkv", "avi", "mov", "webm", "3gp" -> Icons.Default.Movie
-        "zip", "rar", "7z", "tar", "gz" -> Icons.Default.FolderZip
-        "apk", "xapk", "apks" -> Icons.Default.Android
-        "pdf" -> Icons.Default.PictureAsPdf
-        "txt", "md", "log", "json", "xml", "csv" -> Icons.Default.Description
-        "kt", "java", "js", "ts", "py", "c", "cpp", "html", "css", "sh", "smali", "gradle" -> Icons.Default.Code
-        else -> Icons.Default.InsertDriveFile
-    }
-}
-
-private fun iconTint(entry: FileEntry): Color = when {
-    entry.isDir -> SunColors.Folder
-    entry.name.substringAfterLast('.', "").lowercase() in setOf("apk", "xapk") -> SunColors.Success
-    else -> SunColors.TextSecondary
-}
-
-private fun iconBg(entry: FileEntry): Color = when {
-    entry.isDir -> Color(0x1FD9A93F)
-    entry.name.substringAfterLast('.', "").lowercase() in setOf("apk", "xapk") -> Color(0x1F3FB950)
-    else -> Color(0x14FFFFFF)
 }
 
 // ---------------- 底栏 ----------------
@@ -1032,32 +1410,41 @@ private fun BottomBar(
     onRename: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(SunColors.Surface1)) {
-        if (selectionMode) {
+    Column(Modifier.fillMaxWidth().background(SunColors.Surface1).animateContentSize()) {
+        AnimatedVisibility(visible = selectionMode) {
             Row(
-                Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("已选 $selectedCount 项", color = SunColors.Accent, fontSize = 10.sp)
+                Text("已选 $selectedCount 项", color = SunColors.Accent, fontSize = 9.5.sp)
             }
         }
-        Row(
-            Modifier.fillMaxWidth().height(56.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            if (!selectionMode) {
-                BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "后退", canBack, onBack)
-                BarIcon(Icons.AutoMirrored.Filled.ArrowForward, "前进", canForward, onForward)
-                BarIcon(Icons.Default.Add, "新建", true, onNew)
-                BarIcon(Icons.Default.SwapHoriz, "交换窗口", true, onSwap)
-                BarIcon(Icons.Default.ArrowUpward, "上一级", canUp, onUp)
-            } else {
-                BarIcon(Icons.Default.ContentCopy, "复制", true, onCopy)
-                BarIcon(Icons.Default.ContentCut, "剪切", true, onCut)
-                BarIcon(Icons.Default.DriveFileRenameOutline, "重命名", selectedCount == 1, onRename)
-                BarIcon(Icons.Default.Delete, "删除", true, onDelete, danger = true)
-                BarIcon(Icons.Default.Close, "取消", true, onCancel)
+        AnimatedContent(
+            targetState = selectionMode,
+            transitionSpec = {
+                (fadeIn(tween(Motion.Base)) + slideInVertically(tween(Motion.Base)) { it / 3 }) togetherWith
+                    fadeOut(tween(Motion.Fast))
+            },
+            label = "bottomBar"
+        ) { selecting ->
+            Row(
+                Modifier.fillMaxWidth().height(52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                if (!selecting) {
+                    BarIcon(Icons.AutoMirrored.Outlined.ArrowBack, "后退", canBack, onBack)
+                    BarIcon(Icons.Outlined.ArrowForward, "前进", canForward, onForward)
+                    BarIcon(Icons.Outlined.Add, "新建", true, onNew)
+                    BarIcon(Icons.Outlined.SwapHoriz, "交换窗口", true, onSwap)
+                    BarIcon(Icons.Outlined.ArrowUpward, "上一级", canUp, onUp)
+                } else {
+                    BarIcon(Icons.Outlined.ContentCopy, "复制", true, onCopy)
+                    BarIcon(Icons.Outlined.ContentCut, "剪切", true, onCut)
+                    BarIcon(Icons.Outlined.DriveFileRenameOutline, "重命名", selectedCount == 1, onRename)
+                    BarIcon(Icons.Outlined.Delete, "删除", true, onDelete, danger = true)
+                    BarIcon(Icons.Outlined.Close, "取消", true, onCancel)
+                }
             }
         }
     }
@@ -1073,15 +1460,15 @@ private fun BarIcon(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val tint = when {
-        !enabled -> SunColors.TextTertiary.copy(alpha = 0.4f)
+        !enabled -> SunColors.TextTertiary.copy(alpha = 0.35f)
         danger -> SunColors.Danger
         else -> SunColors.TextSecondary
     }
     Box(
         Modifier
-            .size(46.dp)
+            .size(44.dp)
             .clip(CircleShape)
-            .pressScale(interaction, 0.88f)
+            .pressScale(interaction, 0.86f)
             .clickable(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
@@ -1089,7 +1476,12 @@ private fun BarIcon(
             ) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(21.dp))
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(21.dp)
+        )
     }
 }
 
@@ -1136,45 +1528,44 @@ private fun DrawerContent(
     version: String,
     storageUsed: Long,
     storageTotal: Long,
+    bookmarks: List<String>,
     onNavigate: (String) -> Unit,
+    onBookmarks: () -> Unit,
     onSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
     onAbout: () -> Unit
 ) {
     val shortcuts = listOf(
-        Triple("内部存储", "/storage/emulated/0", Icons.Default.Storage),
-        Triple("下载", "/storage/emulated/0/Download", Icons.Default.Download),
-        Triple("文档", "/storage/emulated/0/Documents", Icons.Default.Description),
-        Triple("图片", "/storage/emulated/0/Pictures", Icons.Default.Image),
-        Triple("音乐", "/storage/emulated/0/Music", Icons.Default.Audiotrack),
-        Triple("电影", "/storage/emulated/0/Movies", Icons.Default.Movie),
-        Triple("根目录", "/", Icons.Default.Folder)
+        Triple("内部存储", "/storage/emulated/0", Icons.Outlined.Storage),
+        Triple("下载", "/storage/emulated/0/Download", Icons.Outlined.Download),
+        Triple("文档", "/storage/emulated/0/Documents", Icons.Outlined.Description),
+        Triple("图片", "/storage/emulated/0/Pictures", Icons.Outlined.Image),
+        Triple("音乐", "/storage/emulated/0/Music", Icons.Outlined.MusicNote),
+        Triple("电影", "/storage/emulated/0/Movies", Icons.Outlined.VideoLibrary),
+        Triple("根目录", "/", Icons.Outlined.Folder)
     )
     val existing = shortcuts.filter { File(it.second).isDirectory }
     ModalDrawerSheet(
         drawerContainerColor = SunColors.Surface3,
         drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
-        modifier = Modifier.width(302.dp)
+        modifier = Modifier.width(300.dp)
     ) {
         Column(Modifier.fillMaxHeight().statusBarsPadding()) {
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 14.dp)) {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SunColors.AccentSoft),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Folder, null, tint = SunColors.Accent, modifier = Modifier.size(21.dp))
-                    }
-                    Spacer(Modifier.width(11.dp))
+                    Icon(
+                        Icons.Outlined.Folder,
+                        null,
+                        tint = SunColors.Accent,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
                     Column {
                         Text("SunDocument", color = SunColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                         Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 9.5.sp)
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(15.dp))
                 Text(
                     "${Fmt.size(storageUsed)} 已用 / ${Fmt.size(storageTotal)}",
                     color = SunColors.TextSecondary,
@@ -1194,7 +1585,7 @@ private fun DrawerContent(
                 color = SunColors.TextTertiary,
                 fontSize = 9.5.sp,
                 letterSpacing = 0.6.sp,
-                modifier = Modifier.padding(start = 20.dp, top = 6.dp, bottom = 6.dp)
+                modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 5.dp)
             )
             existing.forEach { (label, path, icon) ->
                 DrawerItem(
@@ -1205,13 +1596,19 @@ private fun DrawerContent(
                 )
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(5.dp))
 
-            DrawerItem(Icons.Default.Settings, "设置", false, onSettings)
-            DrawerItem(Icons.Default.SystemUpdate, "检查更新", false, onCheckUpdate)
-            DrawerItem(Icons.Default.Info, "关于", false, onAbout)
+            DrawerItem(
+                Icons.Outlined.BookmarkBorder,
+                if (bookmarks.isEmpty()) "收藏夹" else "收藏夹（${bookmarks.size}）",
+                false,
+                onBookmarks
+            )
+            DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
+            DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
+            DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)
 
             Spacer(Modifier.weight(1f))
             Text(
@@ -1235,7 +1632,7 @@ private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onCl
             .background(if (selected) SunColors.AccentSoft else Color.Transparent)
             .pressScale(interaction, 0.98f)
             .clickable(interactionSource = interaction, indication = LocalIndication.current) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -1258,15 +1655,14 @@ private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onCl
 /** 长路径中段省略，保留可读的尾部目录名 */
 internal fun compactPath(path: String): String {
     if (path.isEmpty()) return "/"
-    if (path.length <= 40) return path
-    val tail = path.takeLast(34)
+    if (path.length <= 34) return path
+    val tail = path.takeLast(30)
     val cut = tail.indexOf('/')
     return "…" + if (cut >= 0) tail.substring(cut) else tail
 }
 
 internal fun openExternally(context: Context, file: File): Boolean {
-    val ext = file.extension.lowercase()
-    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+    val mime = FileRepo.mimeOf(file)
     return runCatching {
         val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -1275,6 +1671,19 @@ internal fun openExternally(context: Context, file: File): Boolean {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+}
+
+internal fun shareFile(context: Context, file: File): Boolean {
+    return runCatching {
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = FileRepo.mimeOf(file)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "分享 ${file.name}"))
         true
     }.getOrDefault(false)
 }

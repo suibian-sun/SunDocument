@@ -9,7 +9,6 @@ import com.suibian.sunfile.data.FileEntry
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.PrefsStore
 import com.suibian.sunfile.data.SortMode
-import com.suibian.sunfile.data.StorageInfo
 import com.suibian.sunfile.data.StorageStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,9 +28,13 @@ data class PaneState(
     val loading: Boolean = false,
     val firstLoad: Boolean = true,
     val error: String? = null,
+    /** 目录受限时的说明，列表为空但不算错误 */
+    val notice: String? = null,
+    val restricted: Boolean = false,
     val back: List<String> = emptyList(),
     val forward: List<String> = emptyList(),
-    val token: Int = 0
+    val token: Int = 0,
+    val navDirection: Int = 0
 ) {
     val dirCount: Int get() = entries.count { it.isDir }
     val fileCount: Int get() = entries.size - dirCount
@@ -73,8 +76,8 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     private val _active = MutableStateFlow(0)
     val active: StateFlow<Int> = _active
 
-    private val _storage = MutableStateFlow<StorageInfo?>(null)
-    val storage: StateFlow<StorageInfo?> = _storage
+    private val _storage = MutableStateFlow<com.suibian.sunfile.data.StorageInfo?>(null)
+    val storage: StateFlow<com.suibian.sunfile.data.StorageInfo?> = _storage
 
     private val _clipboard = MutableStateFlow(ClipItem(emptyList(), false))
     val clipboard: StateFlow<ClipItem> = _clipboard
@@ -100,7 +103,6 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun init() {
         if (initialized) return
         initialized = true
-        // 每次启动都从内部存储开始，符合"进入即内部存储"的预期
         for (i in 0..1) {
             load(i, "/storage/emulated/0", record = false, pushHistory = false)
         }
@@ -111,7 +113,10 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun pane(index: Int): PaneState = _panes.value[index]
 
     fun setActive(index: Int) {
-        if (index in 0..1) _active.value = index
+        if (index in 0..1 && index != _active.value) {
+            _active.value = index
+            _storage.value = StorageStats.of(_panes.value[index].path)
+        }
     }
 
     private fun mutate(index: Int, block: (PaneState) -> PaneState) {
@@ -126,33 +131,44 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun open(index: Int, path: String) = load(index, path, record = true, pushHistory = true)
 
+    fun openInActive(index: Int, path: String) {
+        setActive(index)
+        load(index, path, record = true, pushHistory = true)
+    }
+
     private fun load(
         index: Int,
         path: String,
         record: Boolean,
         pushHistory: Boolean,
-        selectAfter: String? = null
+        selectAfter: String? = null,
+        direction: Int = 0
     ) {
         val dir = File(path)
         mutate(index) {
-            it.copy(loading = true, error = null, selected = emptySet(), firstLoad = it.entries.isEmpty())
+            it.copy(loading = true, error = null, notice = null, selected = emptySet(), firstLoad = it.entries.isEmpty())
         }
         viewModelScope.launch {
             val cfg = prefsStore.prefs.value
             val result = withContext(Dispatchers.IO) {
-                runCatching { FileRepo.list(dir, cfg.showHidden, cfg.sort) }
+                runCatching { FileRepo.listDetailed(dir, cfg.showHidden, cfg.sort) }
             }
-            result.onSuccess { list ->
+            result.onSuccess { listing ->
                 if (record) prefsStore.saveLastPath(index, dir.absolutePath)
-                _storage.value = withContext(Dispatchers.IO) { StorageStats.of(dir.absolutePath) }
+                if (dir.absolutePath == _panes.value[_active.value].path || index == _active.value) {
+                    _storage.value = withContext(Dispatchers.IO) { StorageStats.of(dir.absolutePath) }
+                }
                 mutate(index) {
                     it.copy(
                         path = dir.absolutePath,
-                        entries = list,
+                        entries = listing.entries,
                         loading = false,
                         firstLoad = false,
                         error = null,
+                        notice = listing.message,
+                        restricted = listing.restricted,
                         token = it.token + 1,
+                        navDirection = direction,
                         back = if (pushHistory && it.path.isNotEmpty() && it.path != dir.absolutePath) {
                             (it.back + it.path).takeLast(50)
                         } else it.back,
@@ -167,6 +183,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                         loading = false,
                         firstLoad = false,
                         error = msg,
+                        restricted = true,
                         path = if (it.path.isEmpty()) dir.absolutePath else it.path
                     )
                 }
@@ -175,26 +192,29 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun goBack() {
-        val i = _active.value
-        val p = _panes.value[i]
+    fun goBack(index: Int = _active.value) {
+        val p = _panes.value[index]
         val prev = p.back.lastOrNull() ?: return
-        mutate(i) { it.copy(back = it.back.dropLast(1), forward = (listOf(it.path) + it.forward).take(50)) }
-        load(i, prev, record = true, pushHistory = false)
+        mutate(index) { it.copy(back = it.back.dropLast(1), forward = (listOf(it.path) + it.forward).take(50)) }
+        load(index, prev, record = true, pushHistory = false, direction = -1)
     }
 
-    fun goForward() {
-        val i = _active.value
-        val p = _panes.value[i]
+    fun goForward(index: Int = _active.value) {
+        val p = _panes.value[index]
         val next = p.forward.firstOrNull() ?: return
-        mutate(i) { it.copy(forward = it.forward.drop(1), back = (it.back + it.path).takeLast(50)) }
-        load(i, next, record = true, pushHistory = false)
+        mutate(index) { it.copy(forward = it.forward.drop(1), back = (it.back + it.path).takeLast(50)) }
+        load(index, next, record = true, pushHistory = false, direction = 1)
     }
 
-    fun goUp() {
-        val p = _panes.value[_active.value]
+    fun goUp(index: Int = _active.value) {
+        val p = _panes.value[index]
         val parent = File(p.path).parentFile ?: return
-        navigate(parent.absolutePath)
+        load(index, parent.absolutePath, record = true, pushHistory = true, direction = -1)
+    }
+
+    fun refreshPane(index: Int) {
+        val p = _panes.value[index]
+        if (p.path.isNotEmpty()) load(index, p.path, record = false, pushHistory = false)
     }
 
     fun refresh() {
@@ -210,7 +230,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _storage.value = StorageStats.of(_panes.value[_active.value].path)
     }
 
-    /** 交换两个窗口的内容：当前看到的目录随之换成另一栏 */
+    /** 交换两个窗口的内容 */
     fun swapPanes() {
         val list = _panes.value
         _panes.value = listOf(list[1], list[0])
@@ -218,27 +238,39 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _messages.tryEmit("已交换 A / B 窗口")
     }
 
+    /** 把另一栏的路径同步到当前栏 */
+    fun copyOtherPathToActive() {
+        val other = _panes.value[1 - _active.value]
+        if (other.path.isNotEmpty()) navigate(other.path)
+    }
+
     // ---------------- 选择 ----------------
 
-    fun toggleSelect(entry: FileEntry) {
-        val i = _active.value
-        mutate(i) { p ->
+    fun toggleSelect(entry: FileEntry, index: Int = _active.value) {
+        mutate(index) { p ->
             val set = p.selected.toMutableSet()
             if (!set.add(entry.path)) set.remove(entry.path)
             p.copy(selected = set)
         }
     }
 
-    fun selectOnly(entry: FileEntry) {
-        mutate(_active.value) { it.copy(selected = setOf(entry.path)) }
+    fun selectOnly(entry: FileEntry, index: Int = _active.value) {
+        mutate(index) { it.copy(selected = setOf(entry.path)) }
     }
 
-    fun selectAll() {
-        mutate(_active.value) { it.copy(selected = it.entries.map { e -> e.path }.toSet()) }
+    fun selectAll(index: Int = _active.value) {
+        mutate(index) { it.copy(selected = it.entries.map { e -> e.path }.toSet()) }
     }
 
-    fun clearSelection() {
-        mutate(_active.value) { it.copy(selected = emptySet()) }
+    fun invertSelection(index: Int = _active.value) {
+        mutate(index) { p ->
+            val all = p.entries.map { it.path }.toSet()
+            p.copy(selected = all - p.selected)
+        }
+    }
+
+    fun clearSelection(index: Int = _active.value) {
+        mutate(index) { it.copy(selected = emptySet()) }
     }
 
     // ---------------- 剪贴板与批量操作 ----------------
@@ -251,7 +283,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
         _clipboard.value = ClipItem(p.selected.toList(), cut)
         mutate(_active.value) { it.copy(selected = emptySet()) }
-        _messages.tryEmit("已${if (cut) "剪切" else "复制"} ${p.selected.size} 项，可交换窗口后粘贴")
+        _messages.tryEmit("已${if (cut) "剪切" else "复制"} ${p.selected.size} 项，切换窗口后粘贴")
     }
 
     fun clearClipboard() {
@@ -303,29 +335,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteSelected() {
-        val p = activePaneState
-        val paths = p.selected.toList()
-        if (paths.isEmpty() || _busy.value != null) return
-        viewModelScope.launch {
-            _busy.value = OpState("正在删除…", "", 0, paths.size.toLong())
-            val fail = withContext(Dispatchers.IO) {
-                var err: String? = null
-                for ((i, path) in paths.withIndex()) {
-                    try {
-                        FileRepo.delete(File(path))
-                    } catch (e: Exception) {
-                        err = e.message
-                        break
-                    }
-                    _busy.value = OpState("正在删除…", File(path).name, i + 1L, paths.size.toLong())
-                }
-                err
-            }
-            _busy.value = null
-            mutate(_active.value) { it.copy(selected = emptySet()) }
-            refreshAll()
-            _messages.tryEmit(fail ?: "已删除 ${paths.size} 项")
-        }
+        deletePaths(activePaneState.selected.toList())
     }
 
     fun deletePaths(paths: List<String>, onDone: () -> Unit = {}) {
@@ -375,25 +385,100 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun create(createDir: Boolean, name: String, onDone: () -> Unit = {}) {
+    /** 批量重命名：对名称做查找替换 */
+    fun renameBatch(paths: List<String>, find: String, replace: String, onDone: (Int) -> Unit = {}) {
+        if (paths.isEmpty() || find.isEmpty() || _busy.value != null) return
+        viewModelScope.launch {
+            _busy.value = OpState("正在重命名…", "", 0, paths.size.toLong())
+            val result = withContext(Dispatchers.IO) {
+                var ok = 0
+                var err: String? = null
+                for ((i, p) in paths.withIndex()) {
+                    val f = File(p)
+                    val newName = f.name.replace(find, replace)
+                    if (newName != f.name && newName.isNotBlank() && !newName.contains("/")) {
+                        runCatching { FileRepo.rename(f, newName) }
+                            .onSuccess { ok++ }
+                            .onFailure { err = it.message }
+                    }
+                    _busy.value = OpState("正在重命名…", f.name, i + 1L, paths.size.toLong())
+                }
+                ok to err
+            }
+            _busy.value = null
+            mutate(_active.value) { it.copy(selected = emptySet()) }
+            refreshAll()
+            onDone(result.first)
+            _messages.tryEmit(result.second ?: "已重命名 ${result.first} 项")
+        }
+    }
+
+    fun create(createDir: Boolean, name: String, onDone: (File?) -> Unit = {}) {
         val parent = activePaneState.currentDir
         viewModelScope.launch {
+            var created: File? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (createDir) FileRepo.createDir(parent, name) else FileRepo.createFile(parent, name)
+                    created = if (createDir) FileRepo.createDir(parent, name) else FileRepo.createFile(parent, name)
                 }.exceptionOrNull()?.message
             }
             refresh()
-            onDone()
+            onDone(created)
             _messages.tryEmit(err ?: if (createDir) "文件夹已创建" else "文件已创建")
         }
+    }
+
+    // ---------------- 压缩包 ----------------
+
+    fun extractArchive(archive: File, destDir: File, onDone: () -> Unit = {}) {
+        if (_busy.value != null) return
+        viewModelScope.launch {
+            _busy.value = OpState("正在解压…", "", 0, 0)
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    FileRepo.extractZip(archive, destDir) { name, done, total ->
+                        _busy.value = OpState("正在解压…", name, done.toLong(), total.toLong())
+                    }
+                }
+            }
+            _busy.value = null
+            refreshAll()
+            onDone()
+            _messages.tryEmit(result.fold({ "已解压 ${it} 个文件" }, { it.message ?: "解压失败" }))
+        }
+    }
+
+    fun compress(paths: List<String>, zipName: String, onDone: () -> Unit = {}) {
+        if (paths.isEmpty() || _busy.value != null) return
+        val destDir = activePaneState.currentDir
+        val name = if (zipName.endsWith(".zip", true)) zipName else "$zipName.zip"
+        viewModelScope.launch {
+            _busy.value = OpState("正在压缩…", "", 0, 0)
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dest = FileRepo.uniqueTarget(destDir, name)
+                    FileRepo.createZip(paths.map { File(it) }, dest) { n, done, total ->
+                        _busy.value = OpState("正在压缩…", n, done.toLong(), total.toLong())
+                    }
+                }
+            }
+            _busy.value = null
+            mutate(_active.value) { it.copy(selected = emptySet()) }
+            refreshAll()
+            onDone()
+            _messages.tryEmit(result.fold({ "已压缩 $it 个文件" }, { it.message ?: "压缩失败" }))
+        }
+    }
+
+    suspend fun checksumOf(file: File, algorithm: String): String = withContext(Dispatchers.IO) {
+        runCatching { FileRepo.checksum(file, algorithm) }.getOrElse { "计算失败：${it.message}" }
     }
 
     // ---------------- 偏好 ----------------
 
     fun updatePrefs(block: (AppPrefs) -> AppPrefs) {
         prefsStore.update(block)
-        refresh()
+        refreshAll()
     }
 
     fun toggleHidden() = updatePrefs { it.copy(showHidden = !it.showHidden) }
@@ -403,6 +488,22 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleAccelerator() = prefsStore.update { it.copy(useAccelerator = !it.useAccelerator) }
 
     fun toggleAutoCheck() = prefsStore.update { it.copy(autoCheckUpdate = !it.autoCheckUpdate) }
+
+    fun setEditorPrefs(fontSize: Int? = null, wrap: Boolean? = null, lineNumbers: Boolean? = null) {
+        prefsStore.update {
+            it.copy(
+                editorFontSize = fontSize ?: it.editorFontSize,
+                editorWrap = wrap ?: it.editorWrap,
+                editorLineNumbers = lineNumbers ?: it.editorLineNumbers
+            )
+        }
+    }
+
+    fun toggleBookmark(path: String): Boolean {
+        val added = prefsStore.toggleBookmark(path)
+        _messages.tryEmit(if (added) "已加入收藏" else "已取消收藏")
+        return added
+    }
 
     fun requestUpdateCheck() {
         _updateTick.value += 1
@@ -465,11 +566,15 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         val map = linkedMapOf<String, String>()
         map["名称"] = file.name
         map["路径"] = file.absolutePath
-        map["类型"] = if (isDir) "文件夹" else {
-            val ext = file.extension.lowercase()
-            if (ext.isEmpty()) "文件" else "${ext.uppercase()} 文件"
+        map["类型"] = when {
+            isDir -> "文件夹"
+            else -> {
+                val ext = file.extension.lowercase()
+                if (ext.isEmpty()) "无扩展名文件" else "${ext.uppercase()} 文件"
+            }
         }
-        map["大小"] = com.suibian.sunfile.util.Fmt.size(size) + if (isDir) "（含子项）" else ""
+        map["大小"] = com.suibian.sunfile.util.Fmt.size(size) +
+            if (isDir) "（递归统计）" else "（${size} 字节）"
         if (isDir) {
             val (d, f) = FileRepo.countChildren(file)
             map["包含"] = "$d 个文件夹，$f 个文件"
@@ -478,6 +583,9 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         map["权限"] = com.suibian.sunfile.util.Fmt.permissions(file)
         map["可读"] = if (file.canRead()) "是" else "否"
         map["可写"] = if (file.canWrite()) "是" else "否"
+        if (!isDir && com.suibian.sunfile.data.FileKinds.isZipReadable(file)) {
+            runCatching { FileRepo.zipEntries(file).size }.getOrNull()?.let { map["压缩包条目"] = "$it 项" }
+        }
         map
     }
 }

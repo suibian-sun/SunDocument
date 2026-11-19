@@ -21,8 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -154,20 +152,12 @@ fun SearchPage(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            Modifier
-                                .size(30.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (r.entry.isDir) androidx.compose.ui.graphics.Color(0x1FD9A93F) else androidx.compose.ui.graphics.Color(0x14FFFFFF)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                if (r.entry.isDir) Icons.Default.Folder else Icons.Default.InsertDriveFile,
-                                null,
-                                tint = if (r.entry.isDir) SunColors.Folder else SunColors.TextSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = com.suibian.sunfile.ui.components.iconOf(r.entry.file, r.entry.isDir),
+                            contentDescription = null,
+                            tint = com.suibian.sunfile.ui.components.tintOf(r.entry.file, r.entry.isDir),
+                            modifier = Modifier.size(19.dp)
+                        )
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(

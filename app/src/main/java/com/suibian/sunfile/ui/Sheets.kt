@@ -1,5 +1,9 @@
 package com.suibian.sunfile.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -26,15 +30,24 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -55,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -62,17 +76,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suibian.sunfile.data.FileEntry
+import com.suibian.sunfile.data.FileKinds
+import com.suibian.sunfile.data.OpenMode
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
+import com.suibian.sunfile.util.Fmt
 import java.io.File
 
 sealed interface SheetKind {
     data object New : SheetKind
     data object Sort : SheetKind
     data object Path : SheetKind
+    data object Bookmarks : SheetKind
     data class Entry(val entry: FileEntry) : SheetKind
+    data class OpenWith(val file: File) : SheetKind
 }
 
 sealed interface DialogKind {
@@ -81,6 +100,9 @@ sealed interface DialogKind {
     data object NewFile : DialogKind
     data class Delete(val paths: List<String>) : DialogKind
     data class Properties(val file: File) : DialogKind
+    data class Compress(val paths: List<String>) : DialogKind
+    data class BatchRename(val paths: List<String>) : DialogKind
+    data class Checksum(val file: File) : DialogKind
     data object About : DialogKind
 }
 
@@ -124,8 +146,8 @@ fun NewSheet(onDismiss: () -> Unit, onFolder: () -> Unit, onFile: () -> Unit) {
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            OptionCard(Icons.Default.CreateNewFolder, "文件夹", SunColors.Folder, Modifier.weight(1f), onFolder)
-            OptionCard(Icons.Default.NoteAdd, "文件", SunColors.Accent, Modifier.weight(1f), onFile)
+            OptionCard(Icons.Outlined.CreateNewFolder, "文件夹", SunColors.Folder, Modifier.weight(1f), onFolder)
+            OptionCard(Icons.Outlined.Description, "文件", SunColors.Accent, Modifier.weight(1f), onFile)
         }
         Spacer(Modifier.height(6.dp))
     }
@@ -207,13 +229,16 @@ fun SortSheet(
 @Composable
 fun EntrySheet(
     entry: FileEntry,
+    bookmarked: Boolean,
     onDismiss: () -> Unit,
     onOpen: () -> Unit,
-    onOpenText: () -> Unit,
-    onOpenExternal: () -> Unit,
+    onOpenWith: () -> Unit,
     onRename: () -> Unit,
     onProperties: () -> Unit,
     onCopyPath: () -> Unit,
+    onShare: () -> Unit,
+    onCompress: () -> Unit,
+    onBookmark: () -> Unit,
     onDelete: () -> Unit
 ) {
     Sheet(onDismiss) {
@@ -227,22 +252,33 @@ fun EntrySheet(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                "${if (entry.isDir) "文件夹" else com.suibian.sunfile.util.Fmt.size(entry.size)} · ${com.suibian.sunfile.util.Fmt.time(entry.lastModified)}",
+                "${if (entry.isDir) "文件夹" else Fmt.size(entry.size)} · ${Fmt.time(entry.lastModified)}",
                 color = SunColors.TextTertiary,
                 fontSize = 10.sp
             )
         }
         Spacer(Modifier.height(10.dp))
+        SheetRow(
+            if (entry.isDir) Icons.Outlined.FolderOpen else Icons.Outlined.OpenInNew,
+            if (entry.isDir) "进入文件夹" else "打开",
+            onOpen
+        )
         if (!entry.isDir) {
-            SheetRow(Icons.Default.OpenInNew, "用其他应用打开", onOpenExternal)
-            SheetRow(Icons.Default.TextFields, "用文本编辑器打开", onOpenText)
-        } else {
-            SheetRow(Icons.Default.OpenInNew, "进入文件夹", onOpen)
+            SheetRow(Icons.Outlined.OpenInNew, "打开方式…", onOpenWith)
         }
-        SheetRow(Icons.Default.DriveFileRenameOutline, "重命名", onRename)
-        SheetRow(Icons.Default.Info, "属性", onProperties)
-        SheetRow(Icons.Default.ContentCopy, "复制路径", onCopyPath)
-        SheetRow(Icons.Default.Delete, "删除", onDelete, danger = true)
+        SheetRow(Icons.Outlined.DriveFileRenameOutline, "重命名", onRename)
+        SheetRow(Icons.Outlined.Info, "属性", onProperties)
+        SheetRow(Icons.Outlined.ContentCopy, "复制路径", onCopyPath)
+        if (!entry.isDir) {
+            SheetRow(Icons.Outlined.Share, "分享", onShare)
+            SheetRow(Icons.Outlined.Archive, "压缩为 ZIP", onCompress)
+        }
+        SheetRow(
+            Icons.Outlined.BookmarkBorder,
+            if (bookmarked) "取消收藏" else "收藏此路径",
+            onBookmark
+        )
+        SheetRow(Icons.Outlined.Delete, "删除", onDelete, danger = true)
     }
 }
 
@@ -272,15 +308,20 @@ private fun SheetRow(
 }
 
 @Composable
-fun PathSheet(current: String, onDismiss: () -> Unit, onGo: (String) -> Unit) {
+fun PathSheet(
+    current: String,
+    bookmarks: List<String>,
+    onDismiss: () -> Unit,
+    onGo: (String) -> Unit
+) {
     var value by remember { mutableStateOf(current) }
-    val quick = listOf(
+    val quick = (listOf(
         "/storage/emulated/0",
         "/storage/emulated/0/Download",
         "/storage/emulated/0/Documents",
         "/storage/emulated/0/Android/data",
         "/"
-    )
+    ) + bookmarks).distinct()
     Sheet(onDismiss) {
         Text(
             "跳转路径",
@@ -299,19 +340,21 @@ fun PathSheet(current: String, onDismiss: () -> Unit, onGo: (String) -> Unit) {
             onDone = { if (value.isNotBlank()) onGo(value.trim()) }
         )
         Spacer(Modifier.height(8.dp))
-        quick.forEach { p ->
-            Text(
-                p,
-                color = SunColors.TextSecondary,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onGo(p) }
-                    .padding(horizontal = 20.dp, vertical = 11.dp)
-            )
+        Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+            quick.forEach { p ->
+                Text(
+                    p,
+                    color = SunColors.TextSecondary,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onGo(p) }
+                        .padding(horizontal = 20.dp, vertical = 11.dp)
+                )
+            }
         }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
@@ -322,6 +365,173 @@ fun PathSheet(current: String, onDismiss: () -> Unit, onGo: (String) -> Unit) {
             }
         }
     }
+}
+
+@Composable
+fun BookmarkSheet(
+    bookmarks: List<String>,
+    current: String,
+    onDismiss: () -> Unit,
+    onGo: (String) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    Sheet(onDismiss) {
+        Text(
+            "收藏路径",
+            color = SunColors.TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 20.dp, bottom = 10.dp)
+        )
+        if (bookmarks.isEmpty()) {
+            Text(
+                "还没有收藏。在文件菜单中选择「收藏此路径」即可添加。",
+                color = SunColors.TextTertiary,
+                fontSize = 11.5.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 15.dp)
+            )
+        } else {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                bookmarks.forEach { p ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onGo(p) }
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.Folder,
+                            null,
+                            tint = if (p == current) SunColors.Accent else SunColors.Folder,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            p,
+                            color = if (p == current) SunColors.Accent else SunColors.TextPrimary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "移除",
+                            color = SunColors.Danger,
+                            fontSize = 10.5.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .clickable { onRemove(p) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 打开方式选择：仿 MT 管理器的「打开方式」弹窗 */
+@Composable
+fun OpenWithSheet(
+    file: File,
+    remembered: OpenMode?,
+    onDismiss: () -> Unit,
+    onPick: (OpenMode) -> Unit,
+    onPickAndRemember: (OpenMode) -> Unit
+) {
+    var remember by remember { mutableStateOf(false) }
+    val ext = FileKinds.extensionOf(file).ifEmpty { "无扩展名" }
+    val modes = buildList {
+        add(OpenMode.TEXT)
+        add(OpenMode.HEX)
+        if (FileKinds.kindOf(file) == com.suibian.sunfile.data.FileKind.IMAGE) add(OpenMode.IMAGE)
+        if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
+        add(OpenMode.EXTERNAL)
+    }
+    Sheet(onDismiss) {
+        Column(Modifier.padding(horizontal = 20.dp)) {
+            Text(
+                "打开方式",
+                color = SunColors.TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                "${file.name} · .$ext" + if (remembered != null) " · 当前默认：${remembered.label}" else "",
+                color = SunColors.TextTertiary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        modes.forEach { mode ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (remember) onPickAndRemember(mode) else onPick(mode)
+                    }
+                    .padding(horizontal = 20.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    modeIcon(mode),
+                    null,
+                    tint = SunColors.TextSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(mode.label, color = SunColors.TextPrimary, fontSize = 13.sp)
+                    Text(modeHint(mode), color = SunColors.TextTertiary, fontSize = 9.sp)
+                }
+                if (remembered == mode) {
+                    Icon(Icons.Default.Check, null, tint = SunColors.Accent, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { remember = !remember }
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = remember,
+                onCheckedChange = { remember = it },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = SunColors.Accent,
+                    uncheckedColor = SunColors.TextTertiary
+                )
+            )
+            Text(
+                "总是用此方式打开 .$ext",
+                color = SunColors.TextSecondary,
+                fontSize = 11.5.sp
+            )
+        }
+    }
+}
+
+private fun modeIcon(mode: OpenMode) = when (mode) {
+    OpenMode.TEXT -> Icons.Outlined.TextFields
+    OpenMode.HEX -> Icons.Outlined.Terminal
+    OpenMode.IMAGE -> Icons.Outlined.Image
+    OpenMode.ARCHIVE -> Icons.Outlined.Archive
+    OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
+}
+
+private fun modeHint(mode: OpenMode) = when (mode) {
+    OpenMode.TEXT -> "语法高亮、补全，可直接编辑保存"
+    OpenMode.HEX -> "按字节查看任意大小的文件"
+    OpenMode.IMAGE -> "内置缩放查看大图"
+    OpenMode.ARCHIVE -> "浏览 zip/apk 内部文件并解压"
+    OpenMode.EXTERNAL -> "交给系统中已安装的应用"
 }
 
 // ---------------- 输入与提示 ----------------
@@ -475,7 +685,7 @@ fun PropertiesDialog(
                 } else {
                     props.forEach { (k, v) ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                            Text(k, color = SunColors.TextTertiary, fontSize = 10.5.sp, modifier = Modifier.width(56.dp))
+                            Text(k, color = SunColors.TextTertiary, fontSize = 10.5.sp, modifier = Modifier.width(64.dp))
                             Text(
                                 v,
                                 color = SunColors.TextPrimary,
@@ -496,6 +706,155 @@ fun PropertiesDialog(
 }
 
 @Composable
+fun CompressDialog(
+    paths: List<String>,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val default = when (paths.size) {
+        1 -> File(paths.first()).name.substringBeforeLast('.').ifEmpty { "archive" } + ".zip"
+        else -> "archive.zip"
+    }
+    var name by remember { mutableStateOf(default) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = { Text("压缩为 ZIP", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        text = {
+            Column {
+                Text("共 ${paths.size} 项", color = SunColors.TextTertiary, fontSize = 10.sp)
+                Spacer(Modifier.height(8.dp))
+                SunTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "压缩包名称",
+                    modifier = Modifier.fillMaxWidth(),
+                    mono = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim()) }) {
+                Text("开始压缩", color = SunColors.Accent, fontSize = 13.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp) }
+        }
+    )
+}
+
+@Composable
+fun BatchRenameDialog(
+    paths: List<String>,
+    onConfirm: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var find by remember { mutableStateOf("") }
+    var replace by remember { mutableStateOf("") }
+    val sample = paths.take(3).map { File(it).name.replace(find, replace) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = { Text("批量重命名 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        text = {
+            Column {
+                SunTextField(
+                    value = find,
+                    onValueChange = { find = it },
+                    label = "查找",
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                SunTextField(
+                    value = replace,
+                    onValueChange = { replace = it },
+                    label = "替换为（留空即删除）",
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("预览", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                sample.forEach { s ->
+                    Text(
+                        s,
+                        color = SunColors.TextSecondary,
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (find.isNotEmpty()) onConfirm(find, replace) }) {
+                Text("重命名", color = SunColors.Accent, fontSize = 13.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp) }
+        }
+    )
+}
+
+@Composable
+fun ChecksumDialog(
+    file: File,
+    loader: suspend (File, String) -> String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val values by produceState(initialValue = emptyMap<String, String>(), file) {
+        val map = LinkedHashMap<String, String>()
+        map["SHA-256"] = loader(file, "SHA-256")
+        map["MD5"] = loader(file, "MD5")
+        value = map
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = { Text("校验和", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        text = {
+            Column {
+                Text(file.name, color = SunColors.TextTertiary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                if (values.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(15.dp), color = SunColors.Accent, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("正在计算…", color = SunColors.TextSecondary, fontSize = 11.sp)
+                    }
+                } else {
+                    values.forEach { (k, v) ->
+                        Text(k, color = SunColors.TextTertiary, fontSize = 9.5.sp, modifier = Modifier.padding(top = 6.dp))
+                        Text(
+                            v,
+                            color = SunColors.TextPrimary,
+                            fontSize = 9.5.sp,
+                            lineHeight = 14.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("checksum", values.values.joinToString("\n")))
+                Toast.makeText(context, "已复制校验和", Toast.LENGTH_SHORT).show()
+            }) { Text("复制", color = SunColors.Accent, fontSize = 13.sp) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭", color = SunColors.TextSecondary, fontSize = 13.sp) }
+        }
+    )
+}
+
+@Composable
 fun AboutDialog(version: String, onDismiss: () -> Unit, onCheckUpdate: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -507,7 +866,7 @@ fun AboutDialog(version: String, onDismiss: () -> Unit, onCheckUpdate: () -> Uni
                 Text("版本 v$version", color = SunColors.TextSecondary, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Kotlin + Jetpack Compose 实现的单栏文件管理器，支持双窗口交换、内置文本编辑与历史版本回滚。",
+                    "Kotlin + Jetpack Compose 实现的双栏文件管理器：线性图标、内置编辑器（语法高亮 / 补全 / 历史版本）、压缩包浏览、十六进制与大图查看。",
                     color = SunColors.TextSecondary,
                     fontSize = 11.5.sp,
                     lineHeight = 18.sp

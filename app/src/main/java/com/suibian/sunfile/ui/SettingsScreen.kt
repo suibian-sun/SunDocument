@@ -61,6 +61,8 @@ fun SettingsPage(
     onToggleAutoCheck: () -> Unit,
     onToggleAccelerator: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onEditorPrefs: (Int?, Boolean?, Boolean?) -> Unit,
+    onClearOpenWith: () -> Unit,
     onAbout: () -> Unit
 ) {
     Column(
@@ -95,8 +97,31 @@ fun SettingsPage(
             SwitchRow("下载加速", "优先使用公共镜像线路，失败自动回退", prefs.useAccelerator, onToggleAccelerator)
             ValueRow("立即检查更新", "当前 v${BuildConfig.VERSION_NAME}", onCheckUpdate)
 
-            SectionTitle("编辑")
+            SectionTitle("编辑器")
+            ValueRow(
+                "字号",
+                "${prefs.editorFontSize} sp · 点击切换",
+                onClick = {
+                    val next = when {
+                        prefs.editorFontSize < 14 -> 14
+                        prefs.editorFontSize < 16 -> 16
+                        prefs.editorFontSize < 18 -> 18
+                        else -> 12
+                    }
+                    onEditorPrefs(next, null, null)
+                }
+            )
+            SwitchRow("自动换行", "长行自动折行显示", prefs.editorWrap) {
+                onEditorPrefs(null, !prefs.editorWrap, null)
+            }
+            SwitchRow("显示行号", "关闭后更适合阅读长段落", prefs.editorLineNumbers) {
+                onEditorPrefs(null, null, !prefs.editorLineNumbers)
+            }
             InfoRow("修改历史", "保存前自动留档，单个文件保留最近 30 个版本")
+
+            SectionTitle("打开方式")
+            InfoRow("记住的选择", "在「打开方式」里勾选后按扩展名记住，共 ${prefs.openWith.size} 个")
+            ValueRow("清除记住的打开方式", "恢复为按类型自动判断", onClearOpenWith)
 
             SectionTitle("关于")
             ValueRow("版本", "v${BuildConfig.VERSION_NAME}", onAbout)

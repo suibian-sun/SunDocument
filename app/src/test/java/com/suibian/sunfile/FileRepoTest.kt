@@ -4,6 +4,7 @@ import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.data.SortSpec
 import com.suibian.sunfile.update.GithubApi
+import com.suibian.sunfile.util.Fmt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -174,6 +175,70 @@ class FileRepoTest {
 
         val byDateAsc = FileRepo.list(root, false, SortSpec(SortMode.DATE, true)).map { it.name }
         assertEquals(listOf("small.txt", "big.txt"), byDateAsc)
+    }
+
+
+    @Test
+    fun `size formatting keeps two decimals`() {
+        assertEquals("0 B", Fmt.size(0))
+        assertEquals("1023 B", Fmt.size(1023))
+        assertEquals("1.50 KB", Fmt.size(1536))
+        assertEquals("3.50 MB", Fmt.size(3L * 1024 * 1024 + 512 * 1024))
+        assertEquals("1.00 GB", Fmt.size(1024L * 1024 * 1024))
+    }
+
+    @Test
+    fun `zip create list and extract roundtrip`() {
+        val src = File(root, "pkg")
+        write(File(src, "a.txt"), "hello")
+        write(File(src, "nested/b.txt"), "world")
+        val zip = File(root, "out.zip")
+        val count = FileRepo.createZip(listOf(src), zip) { _, _, _ -> }
+        assertEquals(2, count)
+
+        val entries = FileRepo.zipEntries(zip).map { it.name }
+        assertTrue(entries.contains("pkg/a.txt"))
+        assertTrue(entries.contains("pkg/nested/b.txt"))
+
+        val dest = tmp.newFolder("unzip")
+        val extracted = FileRepo.extractZip(zip, dest) { _, _, _ -> }
+        assertTrue(extracted >= 2)
+        assertEquals("hello", File(File(dest, "pkg"), "a.txt").readText())
+        assertEquals("world", File(File(dest, "pkg/nested"), "b.txt").readText())
+    }
+
+    @Test
+    fun `hex chunk reads arbitrary offset`() {
+        val f = File(root, "blob.bin")
+        f.writeBytes(ByteArray(100) { it.toByte() })
+        val chunk = FileRepo.readChunk(f, 32, 16)
+        assertEquals(16, chunk.size)
+        assertEquals(32.toByte(), chunk.first())
+        assertEquals(47.toByte(), chunk.last())
+        assertEquals(0, FileRepo.readChunk(f, 200, 16).size)
+    }
+
+    @Test
+    fun `large text is truncated and read only`() {
+        val f = File(root, "big.log")
+        val content = "x".repeat(3 * 1024 * 1024)
+        f.writeText(content)
+        val smart = FileRepo.readTextSmart(f)
+        assertTrue(smart.truncated)
+        assertFalse(smart.editable)
+        assertTrue(smart.text.isNotEmpty())
+        assertTrue(smart.text.length <= 300 * 1024)
+        assertEquals(3L * 1024 * 1024, smart.totalBytes)
+    }
+
+    @Test
+    fun `sha256 matches known digest`() {
+        val f = File(root, "abc.txt")
+        f.writeText("abc")
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            FileRepo.checksum(f, "SHA-256")
+        )
     }
 
     @Test

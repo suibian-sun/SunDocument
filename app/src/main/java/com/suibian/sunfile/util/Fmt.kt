@@ -7,6 +7,15 @@ import java.util.Locale
 object Fmt {
     private const val PATTERN = "yyyy-MM-dd HH:mm"
 
+    // SimpleDateFormat 非线程安全，用 ThreadLocal 复用，避免列表滚动时反复构造
+    private val longTime = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue() = SimpleDateFormat(PATTERN, Locale.getDefault())
+    }
+    private val shortTime = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue() = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+    }
+
+    /** 文件大小：统一保留两位小数，符合"精确到 0.01"的要求 */
     fun size(bytes: Long): String {
         if (bytes < 0) return "-"
         if (bytes < 1024) return "$bytes B"
@@ -17,12 +26,17 @@ object Fmt {
             v /= 1024.0
             i++
         }
-        return if (v >= 100) String.format(Locale.US, "%.0f %s", v, units[i])
-        else String.format(Locale.US, "%.1f %s", v, units[i])
+        return String.format(Locale.US, "%.2f %s", v, units[i])
     }
 
+    /** 保留两位小数的存储占用，如 "36.24 GB / 128.00 GB" */
+    fun sizePair(used: Long, total: Long): String = "${size(used)} / ${size(total)}"
+
     fun time(millis: Long): String =
-        if (millis <= 0) "-" else SimpleDateFormat(PATTERN, Locale.getDefault()).format(Date(millis))
+        if (millis <= 0) "-" else longTime.get()!!.format(Date(millis))
+
+    fun timeShort(millis: Long): String =
+        if (millis <= 0) "-" else shortTime.get()!!.format(Date(millis))
 
     fun speed(bytesPerSec: Long): String = size(bytesPerSec) + "/s"
 
