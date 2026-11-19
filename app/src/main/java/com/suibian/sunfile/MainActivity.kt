@@ -17,6 +17,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.suibian.sunfile.data.Mt2
 import com.suibian.sunfile.data.PrefsStore
 import com.suibian.sunfile.ui.MainScreen
 import com.suibian.sunfile.ui.theme.SunDocumentTheme
@@ -37,6 +38,11 @@ class MainActivity : ComponentActivity() {
             )
         )
         val activity = this
+        Mt2.installCrashHandler(activity)
+        // MT2 目录放在内部存储根目录，卸载后数据仍在；不可写时自动退到应用专属目录
+        kotlin.concurrent.thread(name = "mt2-init", isDaemon = true) {
+            runCatching { Mt2.ensure(activity) }
+        }
         val prefsStore = PrefsStore.get(activity)
         setContent {
             val prefs by prefsStore.prefs.collectAsStateWithLifecycle()

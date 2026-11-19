@@ -24,7 +24,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -58,6 +60,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowForward
@@ -130,7 +133,7 @@ import kotlin.math.min
 
 /** 全屏查看器外壳：淡入 + 轻微上滑，返回键关闭 */
 @Composable
-private fun OverlayShell(
+internal fun OverlayShell(
     title: String,
     subtitle: String,
     onClose: () -> Unit,
@@ -564,21 +567,27 @@ private data class ArcNode(val name: String, val full: String, val isDir: Boolea
  * 与 MT 的操作习惯一致。
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun ArchiveOverlay(
     file: File,
     destDir: File,
+    opVersion: Int = 0,
     onClose: () -> Unit,
     onExtractAll: () -> Unit,
-    onOpenEntry: (File) -> Unit
+    onOpenEntry: (File, String) -> Unit,
+    onRenameRequest: (String) -> Unit = {},
+    onDeleteEntry: (String) -> Unit = {},
+    onAddFiles: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var entries by remember(file) { mutableStateOf<List<FileRepo.ZipItem>?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     var prefix by remember(file) { mutableStateOf("") }
     var opening by remember { mutableStateOf<String?>(null) }
+    var menuNode by remember { mutableStateOf<ArcNode?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(file) {
+    LaunchedEffect(file, opVersion) {
         val result = withContext(Dispatchers.IO) { runCatching { FileRepo.archiveEntries(file) } }
         result.onSuccess { entries = it }.onFailure { error = it.message ?: "无法读取压缩包" }
     }
@@ -599,7 +608,7 @@ fun ArchiveOverlay(
             }
             opening = null
             if (out != null) {
-                onOpenEntry(out)
+                onOpenEntry(out, node.full)
             } else {
                 android.widget.Toast.makeText(context, "无法解压这个文件", android.widget.Toast.LENGTH_SHORT).show()
             }
@@ -611,6 +620,11 @@ fun ArchiveOverlay(
         subtitle = list?.let { "${it.size} 个条目 · ${Fmt.size(file.length())}" } ?: "读取中…",
         onClose = onClose,
         actions = {
+            if (FileKinds.isZipReadable(file)) {
+                IconButton(onClick = onAddFiles, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Outlined.Add, "添加文件", tint = SunColors.TextSecondary, modifier = Modifier.size(19.dp))
+                }
+            }
             IconButton(onClick = onExtractAll, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Unarchive, "全部解压", tint = SunColors.Accent, modifier = Modifier.size(19.dp))
             }
@@ -671,9 +685,11 @@ fun ArchiveOverlay(
                             Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
-                                .clickable(enabled = opening == null) {
-                                    if (node.isDir) prefix = node.full else openEntry(node)
-                                }
+                                .combinedClickable(
+                                    enabled = opening == null,
+                                    onLongClick = { menuNode = node },
+                                    onClick = { if (node.isDir) prefix = node.full else openEntry(node) }
+                                )
                                 .padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -728,6 +744,54 @@ fun ArchiveOverlay(
                 )
             }
         }
+    }
+
+    menuNode?.let { node ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { menuNode = null },
+            containerColor = SunColors.Surface4,
+            shape = SunShapes.Medium,
+            title = {
+                Text(node.name, color = SunColors.TextPrimary, fontSize = 13.sp, maxLines = 1)
+            },
+            text = {
+                Column {
+                    Text("压缩包内路径", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                    Text(
+                        "/" + node.full,
+                        color = SunColors.TextSecondary,
+                        fontSize = 9.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                    if (!node.isDir) {
+                        Text(
+                            "重命名（改完整路径即移动）",
+                            color = SunColors.TextPrimary,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { menuNode = null; onRenameRequest(node.full) }
+                                .padding(vertical = 9.dp)
+                        )
+                    }
+                    Text(
+                        "从压缩包删除",
+                        color = SunColors.Danger,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { menuNode = null; onDeleteEntry(node.full) }
+                            .padding(vertical = 9.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { menuNode = null }) {
+                    Text("关闭", color = SunColors.Accent, fontSize = 12.sp)
+                }
+            }
+        )
     }
 }
 

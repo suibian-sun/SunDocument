@@ -27,7 +27,8 @@ data class AppPrefs(
  * 保证设置页修改后主界面立即生效（多实例会各自持有独立 StateFlow）。
  */
 class PrefsStore private constructor(context: Context) {
-    private val sp = context.applicationContext.getSharedPreferences("sunfile", Context.MODE_PRIVATE)
+    private val app = context.applicationContext
+    private val sp = app.getSharedPreferences("sunfile", Context.MODE_PRIVATE)
 
     private val _prefs = MutableStateFlow(load())
     val prefs: StateFlow<AppPrefs> = _prefs
@@ -88,9 +89,11 @@ class PrefsStore private constructor(context: Context) {
         if (mode == null) next.remove(ext) else next[ext] = mode
         _prefs.value = _prefs.value.copy(openWith = next)
         sp.edit().putString("open_with", encodeOpenWith(next)).apply()
+        if (mode == null) Mt2.clearOpenMethod(app, ext) else Mt2.writeOpenMethod(app, ext, mode.name)
     }
 
     fun clearOpenWith() {
+        _prefs.value.openWith.keys.forEach { Mt2.clearOpenMethod(app, it) }
         _prefs.value = _prefs.value.copy(openWith = emptyMap())
         sp.edit().putString("open_with", "").apply()
     }

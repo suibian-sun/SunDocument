@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -44,6 +45,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.FormatLineSpacing
 import androidx.compose.material.icons.filled.History
@@ -139,6 +141,60 @@ import kotlin.math.sin
 /** 首次打开后，滚动到底部会自动继续追加的字节上限；再往后改为手动点击加载 */
 private const val AUTO_GROW_LIMIT = 1_200_000L
 
+private fun lineIndexOf(text: String, offset: Int): Int {
+    var line = 1
+    var i = 0
+    val end = offset.coerceIn(0, text.length)
+    while (i < end) {
+        if (text[i] == '\n') line++
+        i++
+    }
+    return line
+}
+
+private fun lineEndOffset(text: String, line: Int): Int {
+    val start = offsetOfLine(text, line)
+    val idx = text.indexOf('\n', start)
+    return if (idx < 0) text.length else idx
+}
+
+private fun commentPrefix(lang: Lang): String = when (lang) {
+    Lang.PYTHON, Lang.SHELL, Lang.YAML, Lang.PROPERTIES, Lang.INI, Lang.RUBY, Lang.DOCKER, Lang.GRADLE -> "# "
+    Lang.SQL, Lang.LUA -> "-- "
+    Lang.HTML, Lang.XML, Lang.MARKDOWN, Lang.JSON, Lang.CSS -> ""
+    else -> "// "
+}
+
+/** 行首加/去注释，返回新文本与新的选区 */
+private fun toggleComment(text: String, fromLine: Int, toLine: Int, prefix: String): Pair<String, IntRange>? {
+    if (prefix.isBlank()) return null
+    val lines = text.split('\n').toMutableList()
+    if (lines.isEmpty()) return null
+    val a = (fromLine - 1).coerceIn(0, lines.lastIndex)
+    val b = (toLine - 1).coerceIn(0, lines.lastIndex)
+    val token = prefix.trimEnd()
+    val targets = (a..b).filter { lines[it].isNotBlank() }
+    if (targets.isEmpty()) return null
+    val commented = targets.all { lines[it].trimStart().startsWith(token) }
+    for (i in a..b) {
+        if (lines[i].isBlank()) continue
+        lines[i] = if (commented) {
+            val idx = lines[i].indexOf(token)
+            if (idx < 0) lines[i] else {
+                val removed = lines[i].removeRange(idx, idx + token.length)
+                if (idx == 0 && removed.startsWith(" ")) removed.substring(1) else removed
+            }
+        } else {
+            val indent = lines[i].takeWhile { it == ' ' || it == '\t' }
+            indent + prefix + lines[i].removePrefix(indent)
+        }
+    }
+    val newText = lines.joinToString("\n")
+    val start = offsetOfLine(newText, a + 1)
+    val end = lineEndOffset(newText, b + 1)
+    return newText to (start until maxOf(start + 1, end))
+}
+
 @Composable
 fun EditorOverlay(
     file: File,
@@ -180,6 +236,21 @@ fun EditorOverlay(
     var saveAsOpen by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var exitConfirm by remember { mutableStateOf(false) }
+    var lineAnchor by remember { mutableIntStateOf(-1) }
+
+    fun selectLines(line: Int) {
+        val t = value.text
+        val anchorLine = lineAnchor
+        if (anchorLine > 0 && anchorLine != line) {
+            val a = minOf(anchorLine, line)
+            val b = maxOf(anchorLine, line)
+            value = value.copy(selection = TextRange(offsetOfLine(t, a), lineEndOffset(t, b)))
+            lineAnchor = -1
+        } else {
+            lineAnchor = line
+            value = value.copy(selection = TextRange(offsetOfLine(t, line), lineEndOffset(t, line)))
+        }
+    }
     var burstKey by remember { mutableIntStateOf(0) }
     var completion by remember { mutableStateOf<CompletionResult?>(null) }
     var completionIndex by remember { mutableIntStateOf(0) }
@@ -456,6 +527,27 @@ fun EditorOverlay(
                             menuOpen = false
                             vm.reload()
                         }
+                        EditorMenu("换行符：${state.newline}", Icons.Default.FormatLineSpacing) {
+                            menuOpen = false
+                            vm.setNewline(if (state.newline == "LF") "CRLF" else "LF")
+                        }
+                        EditorMenu("切换注释", Icons.Default.Code) {
+                            menuOpen = false
+                            val sel = value.selection
+                            val from = lineIndexOf(value.text, sel.min)
+                            val to = lineIndexOf(value.text, sel.max)
+                            val result = toggleComment(value.text, from, to, commentPrefix(state.lang))
+                            if (result == null) {
+                                Toast.makeText(context, "当前类型没有行注释语法", Toast.LENGTH_SHORT).show()
+                            } else {
+                                value = TextFieldValue(result.first, TextRange(result.second.first, result.second.last))
+                                vm.updateText(result.first)
+                            }
+                        }
+                        EditorMenu("选中当前行", Icons.Default.FormatLineSpacing) {
+                            menuOpen = false
+                            selectLines(caretLine)
+                        }
                         EditorMenu("十六进制查看", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
                             onOpenHex(state.file ?: file)
@@ -590,13 +682,27 @@ fun EditorOverlay(
                     ) {
                         // 行号：只画可见的那几十行，滚动时按偏移重绘
                         if (lineNumbers && !wrap) {
+                            val topPadPx = with(density) { topPad.toPx() }
                             LineGutter(
                                 scrollState = vScroll,
                                 lineHeightPx = lineHpx,
-                                topPaddingPx = with(density) { topPad.toPx() },
+                                topPaddingPx = topPadPx,
                                 totalLines = totalLines,
                                 activeLine = caretLine - 1,
-                                modifier = Modifier.width(42.dp).fillMaxHeight()
+                                onLongPressLine = { line ->
+                                    if (line in 1..totalLines) selectLines(line)
+                                },
+                                modifier = Modifier
+                                    .width(42.dp)
+                                    .fillMaxHeight()
+                                    .pointerInput(totalLines, lineHpx) {
+                                        detectTapGestures(onLongPress = { pos ->
+                                            if (lineHpx > 0f) {
+                                                val line = ((pos.y + vScroll.value - topPadPx) / lineHpx).toInt() + 1
+                                                if (line >= 1) selectLines(line)
+                                            }
+                                        })
+                                    }
                             )
                         }
                         BasicTextField(
@@ -906,6 +1012,7 @@ private fun LineGutter(
     topPaddingPx: Float,
     totalLines: Int,
     activeLine: Int,
+    onLongPressLine: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current

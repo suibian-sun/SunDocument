@@ -7,12 +7,15 @@ enum class FileKind { DIR, TEXT, IMAGE, AUDIO, VIDEO, ARCHIVE, APK, PDF, OFFICE,
 
 enum class OpenMode(val label: String) {
     TEXT("文本编辑器"),
-    HEX("十六进制查看器"),
+    HEX("十六进制编辑器"),
     IMAGE("图片查看器"),
     AUDIO("音乐播放器"),
     VIDEO("视频播放器"),
     DOCUMENT("文档查看器"),
     ARCHIVE("压缩包浏览器"),
+    AXML("AXML 反编译"),
+    DEX("Dex 结构浏览"),
+    INFO("安装包信息"),
     EXTERNAL("用其他应用打开")
 }
 

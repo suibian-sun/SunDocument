@@ -23,6 +23,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ArrowForward
@@ -121,6 +124,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -167,6 +172,7 @@ sealed interface Page {
     data object Files : Page
     data object Search : Page
     data object Settings : Page
+    data object Terminal : Page
 }
 
 /** 内置全屏查看器 */
@@ -177,6 +183,8 @@ private sealed interface Viewer {
     data class Audio(val file: File, val playlist: List<File>) : Viewer
     data class Video(val file: File, val playlist: List<File>) : Viewer
     data class Doc(val file: File) : Viewer
+    data class Compare(val left: File, val right: File) : Viewer
+    data class Reverse(val file: File, val tab: Int = 0) : Viewer
 }
 
 @Composable
@@ -215,6 +223,8 @@ fun MainScreen(
     var openWithTarget by remember { mutableStateOf<File?>(null) }
     var openFailure by remember { mutableStateOf<File?>(null) }
     var contextMenu by remember { mutableStateOf<Pair<FileEntry, Offset>?>(null) }
+    var archiveVersion by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
 
     LaunchedEffect(Unit) { vm.init() }
 
@@ -278,6 +288,9 @@ fun MainScreen(
             OpenMode.VIDEO -> viewer = Viewer.Video(file, playlistOf(file, FileKind.VIDEO))
             OpenMode.DOCUMENT -> viewer = Viewer.Doc(file)
             OpenMode.ARCHIVE -> viewer = Viewer.Archive(file)
+            OpenMode.AXML -> viewer = Viewer.Reverse(file, 1)
+            OpenMode.DEX -> viewer = Viewer.Reverse(file, 2)
+            OpenMode.INFO -> viewer = Viewer.Reverse(file, 0)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
     }
@@ -326,6 +339,10 @@ fun MainScreen(
                 },
                 onAbout = {
                     dialog = DialogKind.About
+                    scope.launch { drawerState.close() }
+                },
+                onTerminal = {
+                    page = Page.Terminal
                     scope.launch { drawerState.close() }
                 }
             )
@@ -419,6 +436,32 @@ fun MainScreen(
                             pane.selected.singleOrNull()?.let {
                                 dialog = DialogKind.Chmod(File(it), File(it).let { f -> runCatching { com.suibian.sunfile.data.Shell.modeOf(f.absolutePath) }.getOrNull() })
                             }
+                        },
+                        onQuickSelect = { index, pos -> vm.selectAt(pos, index) },
+                        onDragSelect = { index, a, b -> vm.selectRange(a, b, index) },
+                        onFilter = { dialog = DialogKind.Filter(pane.filter) },
+                        onClearFilter = { vm.clearFilter() },
+                        onGoto = { dialog = DialogKind.Goto(pane.path) },
+                        onSelectSimilar = { vm.selectSimilar() },
+                        onShareSelection = {
+                            val targets = pane.selected.map { File(it) }
+                            if (targets.isEmpty()) {
+                                Toast.makeText(context, "先选中文件", Toast.LENGTH_SHORT).show()
+                            } else if (targets.size == 1) {
+                                if (!shareFile(context, targets.first())) {
+                                    Toast.makeText(context, "分享失败", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                shareFiles(context, targets)
+                            }
+                        },
+                        onCompareSelection = {
+                            val targets = pane.selected.map { File(it) }
+                            if (targets.size != 2) {
+                                Toast.makeText(context, "请选中两个文件", Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewer = Viewer.Compare(targets[0], targets[1])
+                            }
                         }
                     )
 
@@ -440,6 +483,8 @@ fun MainScreen(
                             editorTarget = hit.file
                         }
                     )
+
+                    Page.Terminal -> TerminalPage(onBack = { page = Page.Files })
 
                     Page.Settings -> SettingsPage(
                         prefs = prefs,
@@ -467,7 +512,9 @@ fun MainScreen(
                                 vm.refreshAll()
                             }
                         },
-                        onAbout = { dialog = DialogKind.About }
+                        onAbout = { dialog = DialogKind.About },
+                        dataDir = remember { runCatching { com.suibian.sunfile.data.Mt2.root(context).absolutePath }.getOrDefault("") },
+                        onOpenWithManager = { sheet = SheetKind.OpenWithManager }
                     )
                 }
             }
@@ -531,6 +578,15 @@ fun MainScreen(
                         if (!installApk(context, target)) {
                             Toast.makeText(context, "无法启动安装程序", Toast.LENGTH_SHORT).show()
                         }
+                    })
+                    add(EntryAction(Icons.Outlined.Info, "安装包信息") {
+                        viewer = Viewer.Reverse(target, 0)
+                    })
+                    add(EntryAction(Icons.Outlined.Description, "反编译 AndroidManifest") {
+                        viewer = Viewer.Reverse(target, 1)
+                    })
+                    add(EntryAction(Icons.Outlined.Terminal, "Dex 结构浏览") {
+                        viewer = Viewer.Reverse(target, 2)
                     })
                 }
                 if (!entry.isDir) {
@@ -645,10 +701,23 @@ fun MainScreen(
                 openWith(s.file, mode)
             },
             onPickAndRemember = { mode ->
-                vm.prefsStore.setOpenWith(FileKinds.extensionOf(s.file), mode)
+                vm.setOpenWith(FileKinds.extensionOf(s.file), mode)
                 sheet = null
                 openWith(s.file, mode)
-            }
+            },
+            onSetDefault = { mode ->
+                vm.setOpenWith(FileKinds.extensionOf(s.file), mode)
+                sheet = null
+                Toast.makeText(context, "已设为默认：${mode.label}", Toast.LENGTH_SHORT).show()
+            },
+            onManage = { sheet = SheetKind.OpenWithManager }
+        )
+
+        is SheetKind.OpenWithManager -> OpenWithManagerSheet(
+            mapping = prefs.openWith,
+            onRemove = { ext -> vm.setOpenWith(ext, null) },
+            onClearAll = { vm.clearAllOpenWith(); sheet = null },
+            onDismiss = { sheet = null }
         )
 
         null -> Unit
@@ -665,9 +734,18 @@ fun MainScreen(
                 openWith(file, mode)
             },
             onPickAndRemember = { mode ->
-                vm.prefsStore.setOpenWith(FileKinds.extensionOf(file), mode)
+                vm.setOpenWith(FileKinds.extensionOf(file), mode)
                 openWithTarget = null
                 openWith(file, mode)
+            },
+            onSetDefault = { mode ->
+                vm.setOpenWith(FileKinds.extensionOf(file), mode)
+                openWithTarget = null
+                Toast.makeText(context, "已设为默认：${mode.label}", Toast.LENGTH_SHORT).show()
+            },
+            onManage = {
+                openWithTarget = null
+                sheet = SheetKind.OpenWithManager
             }
         )
     }
@@ -737,20 +815,59 @@ fun MainScreen(
 
         is DialogKind.Compress -> CompressDialog(
             paths = d.paths,
-            onConfirm = { name ->
+            onConfirm = { name, format ->
                 dialog = null
-                vm.compress(d.paths, name)
+                vm.compressAs(d.paths, name, format)
             },
             onDismiss = { dialog = null }
         )
 
         is DialogKind.BatchRename -> BatchRenameDialog(
             paths = d.paths,
-            onConfirm = { find, replace ->
+            onConfirm = { expr ->
                 dialog = null
-                vm.renameBatch(d.paths, find, replace)
+                vm.renameWithExpr(d.paths, expr)
             },
             onDismiss = { dialog = null }
+        )
+
+        is DialogKind.ZipRename -> InputDialog(
+            title = "重命名压缩包条目",
+            label = "完整路径（改父目录即移动）",
+            initial = d.entry,
+            confirmText = "保存",
+            onDismiss = { dialog = null },
+            onConfirm = { name ->
+                dialog = null
+                val target = name.trim()
+                if (target.isNotEmpty() && target != d.entry) {
+                    vm.zipRenameEntry(d.zip, d.entry, target) { archiveVersion++ }
+                }
+            }
+        )
+
+        is DialogKind.Filter -> InputDialog(
+            title = "过滤当前列表",
+            label = "关键字 / 正则 / !否定",
+            initial = d.current,
+            confirmText = "应用",
+            onDismiss = { dialog = null },
+            onConfirm = { text ->
+                dialog = null
+                vm.setFilter(text)
+            }
+        )
+
+        is DialogKind.Goto -> InputDialog(
+            title = "跳转到路径",
+            label = "绝对路径",
+            initial = d.current,
+            confirmText = "跳转",
+            onDismiss = { dialog = null },
+            onConfirm = { text ->
+                dialog = null
+                if (text.isNotBlank()) vm.navigate(text.trim())
+            }
         )
 
         is DialogKind.Chmod -> ChmodDialog(
@@ -793,9 +910,18 @@ fun MainScreen(
                     openWith(file, mode)
                 },
                 onPickAndRemember = { mode ->
-                    vm.prefsStore.setOpenWith(FileKinds.extensionOf(file), mode)
+                    vm.setOpenWith(FileKinds.extensionOf(file), mode)
                     openFailure = null
                     openWith(file, mode)
+                },
+                onSetDefault = { mode ->
+                    vm.setOpenWith(FileKinds.extensionOf(file), mode)
+                    openFailure = null
+                    Toast.makeText(context, "已设为默认：${mode.label}", Toast.LENGTH_SHORT).show()
+                },
+                onManage = {
+                    openFailure = null
+                    sheet = SheetKind.OpenWithManager
                 }
             )
         }
@@ -833,8 +959,25 @@ fun MainScreen(
                 viewer = Viewer.Hex(f)
             },
             onClose = {
+                val pending = zipEdit
+                zipEdit = null
                 editorTarget = null
                 editorLine = 0
+                if (pending != null) {
+                    scope.launch {
+                        val now = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { hashOf(pending.temp) }.getOrDefault("")
+                        }
+                        if (now != pending.hash) {
+                            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching { pending.temp.readBytes() }.getOrNull()
+                            }
+                            if (bytes != null) {
+                                vm.zipPutEntry(pending.zip, pending.entry, bytes) { archiveVersion++ }
+                            }
+                        }
+                    }
+                }
                 vm.refreshAll()
             }
         )
@@ -842,7 +985,9 @@ fun MainScreen(
 
     // 查看器
     when (val v = viewer) {
-        is Viewer.Hex -> HexViewerOverlay(v.file) { viewer = null }
+        is Viewer.Hex -> HexEditorOverlay(v.file) { viewer = null }
+        is Viewer.Compare -> CompareOverlay(v.left, v.right) { viewer = null }
+        is Viewer.Reverse -> ReverseOverlay(v.file, v.tab) { viewer = null }
         is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { viewer = null }
         is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { viewer = null }
         is Viewer.Video -> VideoViewerOverlay(v.file, v.playlist) { viewer = null }
@@ -857,19 +1002,60 @@ fun MainScreen(
         is Viewer.Archive -> ArchiveOverlay(
             file = v.file,
             destDir = panes[active].currentDir,
+            opVersion = archiveVersion,
             onClose = { viewer = null },
             onExtractAll = {
                 val dest = panes[active].currentDir
                 viewer = null
                 vm.extractArchive(v.file, dest)
             },
-            onOpenEntry = { temp ->
+            onOpenEntry = { temp, entryName ->
                 viewer = null
-                openFile(temp, Offset.Zero)
+                val mode = prefs.openWith[FileKinds.extensionOf(temp)] ?: FileKinds.defaultMode(temp)
+                if (mode == OpenMode.TEXT) {
+                    scope.launch {
+                        val before = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { hashOf(temp) }.getOrDefault("")
+                        }
+                        zipEdit = ZipEdit(v.file, entryName, temp, before)
+                        editorOrigin = Offset.Zero
+                        editorTarget = temp
+                    }
+                } else {
+                    openFile(temp, Offset.Zero)
+                }
+            },
+            onRenameRequest = { entry -> dialog = DialogKind.ZipRename(v.file, entry) },
+            onDeleteEntry = { entry ->
+                vm.zipDeleteEntries(v.file, listOf(entry)) { archiveVersion++ }
+            },
+            onAddFiles = {
+                val paths = panes[active].selected.toList()
+                if (paths.isEmpty()) {
+                    Toast.makeText(context, "先在文件列表选中要添加的文件", Toast.LENGTH_SHORT).show()
+                } else {
+                    vm.zipAddFiles(v.file, paths) { archiveVersion++ }
+                }
             }
         )
         null -> Unit
     }
+}
+
+/** 从压缩包打开的文件：编辑保存后据此写回条目 */
+private data class ZipEdit(val zip: File, val entry: String, val temp: File, val hash: String)
+
+private fun hashOf(file: File): String {
+    val md = java.security.MessageDigest.getInstance("MD5")
+    file.inputStream().use { input ->
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n <= 0) break
+            md.update(buf, 0, n)
+        }
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
 }
 
 // ---------------- 文件页 ----------------
@@ -894,6 +1080,8 @@ private fun FilesPage(
     onOpenEntry: (Int, FileEntry, Offset) -> Unit,
     onLongPress: (Int, FileEntry, Offset) -> Unit,
     onToggleSelect: (Int, FileEntry) -> Unit,
+    onQuickSelect: (Int, Int) -> Unit,
+    onDragSelect: (Int, Int, Int) -> Unit,
     onUp: (Int) -> Unit,
     onRefresh: (Int) -> Unit,
     onToggleBookmark: (String) -> Unit,
@@ -902,6 +1090,9 @@ private fun FilesPage(
     onNew: () -> Unit,
     onSwap: () -> Unit,
     onSync: () -> Unit,
+    onGoto: () -> Unit,
+    onFilter: () -> Unit,
+    onClearFilter: () -> Unit,
     onSelectionCopy: () -> Unit,
     onSelectionCut: () -> Unit,
     onSelectionDelete: () -> Unit,
@@ -912,6 +1103,7 @@ private fun FilesPage(
     onSort: () -> Unit,
     onSelectAll: () -> Unit,
     onInvertSelection: () -> Unit,
+    onSelectSimilar: () -> Unit,
     onToggleHidden: () -> Unit,
     onSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
@@ -922,7 +1114,9 @@ private fun FilesPage(
     onChecksum: () -> Unit,
     onBookmarks: () -> Unit,
     onApkInfo: () -> Unit,
-    onChmod: () -> Unit
+    onChmod: () -> Unit,
+    onShareSelection: () -> Unit,
+    onCompareSelection: () -> Unit
 ) {
     val pane = panes[active]
     val scrollMemory = remember { mutableStateMapOf<String, Int>() }
@@ -964,6 +1158,39 @@ private fun FilesPage(
             onToggleBookmark = onToggleBookmark
         )
 
+        // 过滤状态条：只在生效时出现，一行说清过滤条件与剩余数量
+        AnimatedVisibility(visible = pane.filter.isNotBlank(), enter = fadeIn(tween(Motion.Fast)), exit = fadeOut(tween(Motion.Fast))) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(30.dp)
+                    .background(SunColors.AccentSoft)
+                    .padding(start = 14.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "过滤  ${pane.filter}",
+                    color = SunColors.Accent,
+                    fontSize = 9.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("${pane.entries.size} 项", color = SunColors.TextTertiary, fontSize = 9.sp)
+                Icon(
+                    Icons.Outlined.Close,
+                    "清除过滤",
+                    tint = SunColors.TextSecondary,
+                    modifier = Modifier
+                        .padding(start = 6.dp)
+                        .size(15.dp)
+                        .clickable { onClearFilter() }
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+
         if (!hasAccess) GrantBanner(onRequestAccess)
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -977,6 +1204,8 @@ private fun FilesPage(
                 onOpen = { entry, origin -> onOpenEntry(0, entry, origin) },
                 onLongPress = { entry, origin -> onLongPress(0, entry, origin) },
                 onToggle = { onToggleSelect(0, it) },
+                onQuickSelect = { pos -> onQuickSelect(0, pos) },
+                onDragSelect = { a, b -> onDragSelect(0, a, b) },
                 onUp = { onUp(0) },
                 onRefresh = { onRefresh(0) }
             )
@@ -991,6 +1220,8 @@ private fun FilesPage(
                 onOpen = { entry, origin -> onOpenEntry(1, entry, origin) },
                 onLongPress = { entry, origin -> onLongPress(1, entry, origin) },
                 onToggle = { onToggleSelect(1, it) },
+                onQuickSelect = { pos -> onQuickSelect(1, pos) },
+                onDragSelect = { a, b -> onDragSelect(1, a, b) },
                 onUp = { onUp(1) },
                 onRefresh = { onRefresh(1) }
             )
@@ -1002,15 +1233,27 @@ private fun FilesPage(
             canBack = pane.canBack,
             canForward = pane.canForward,
             canUp = pane.canUp,
+            filterActive = pane.filter.isNotBlank(),
             onBack = onBack,
             onForward = onForward,
             onNew = onNew,
             onSync = onSync,
             onUp = { onUp(active) },
+            onGoto = onGoto,
+            onFilter = onFilter,
+            onSwipeUp = onBookmarks,
             onCopy = onSelectionCopy,
             onCut = onSelectionCut,
             onDelete = onSelectionDelete,
             onRename = onSelectionRename,
+            onSelectAll = onSelectAll,
+            onInvert = onInvertSelection,
+            onSimilar = onSelectSimilar,
+            onCompress = onCompressSelection,
+            onBatchRename = onBatchRename,
+            onProperties = onProperties,
+            onShare = onShareSelection,
+            onCompare = onCompareSelection,
             onCancel = onClearSelection
         )
     }
@@ -1289,6 +1532,8 @@ private fun PaneView(
     onOpen: (FileEntry, Offset) -> Unit,
     onLongPress: (FileEntry, Offset) -> Unit,
     onToggle: (FileEntry) -> Unit,
+    onQuickSelect: (Int) -> Unit,
+    onDragSelect: (Int, Int) -> Unit,
     onUp: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -1333,7 +1578,9 @@ private fun PaneView(
                 scrollMemory = scrollMemory,
                 onOpen = { entry, origin -> onActivate(); onOpen(entry, origin) },
                 onLongPress = { entry, origin -> onActivate(); onLongPress(entry, origin) },
-                onToggle = { onActivate(); onToggle(it) },
+                onToggle = { entry -> onActivate(); onToggle(entry) },
+                onQuickSelect = { pos -> onActivate(); onQuickSelect(pos) },
+                onDragSelect = { a, b -> onActivate(); onDragSelect(a, b) },
                 onRetry = { onActivate(); onRefresh() },
                 onUp = { onActivate(); onUp() }
             )
@@ -1381,6 +1628,8 @@ private fun PaneList(
     onOpen: (FileEntry, Offset) -> Unit,
     onLongPress: (FileEntry, Offset) -> Unit,
     onToggle: (FileEntry) -> Unit,
+    onQuickSelect: (Int) -> Unit,
+    onDragSelect: (Int, Int) -> Unit,
     onRetry: () -> Unit,
     onUp: () -> Unit
 ) {
@@ -1514,7 +1763,49 @@ private fun PaneList(
             else -> LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(bottom = 8.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 左右滑动进入多选：只在横向位移明显大于纵向时才接管，
+                    // 不消费按下事件，因此轻点、长按、纵向滚动都不受影响
+                    .pointerInput(pane.path, pane.entries.size) {
+                        val threshold = 26.dp.toPx()
+                        fun indexAt(y: Float): Int {
+                            val items = listState.layoutInfo.visibleItemsInfo
+                            if (items.isEmpty()) return -1
+                            for (v in items) if (y >= v.offset && y < v.offset + v.size) return v.index
+                            return if (y < items.first().offset) items.first().index else items.last().index
+                        }
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var dx = 0f
+                            var dy = 0f
+                            var active = false
+                            var anchor = -1
+                            while (true) {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                val c = e.changes.firstOrNull() ?: break
+                                if (c.changedToUpIgnoreConsumed()) break
+                                val d = c.positionChange()
+                                dx += d.x
+                                dy += d.y
+                                if (!active && kotlin.math.abs(dx) > threshold &&
+                                    kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.3f
+                                ) {
+                                    val pos = indexAt(down.position.y)
+                                    if (pos >= 0) {
+                                        active = true
+                                        anchor = pos
+                                        onQuickSelect(pos)
+                                    }
+                                }
+                                if (active) {
+                                    c.consume()
+                                    val cur = indexAt(c.position.y)
+                                    if (cur >= 0 && anchor >= 0) onDragSelect(anchor, cur)
+                                }
+                            }
+                        }
+                    }
             ) {
                 items(pane.entries, key = { it.path }) { entry ->
                     FileRow(
@@ -1626,24 +1917,65 @@ private fun BottomBar(
     canBack: Boolean,
     canForward: Boolean,
     canUp: Boolean,
+    filterActive: Boolean,
     onBack: () -> Unit,
     onForward: () -> Unit,
     onNew: () -> Unit,
     onSync: () -> Unit,
     onUp: () -> Unit,
+    onGoto: () -> Unit,
+    onFilter: () -> Unit,
+    onSwipeUp: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
+    onSelectAll: () -> Unit,
+    onInvert: () -> Unit,
+    onSimilar: () -> Unit,
+    onCompress: () -> Unit,
+    onBatchRename: () -> Unit,
+    onProperties: () -> Unit,
+    onShare: () -> Unit,
+    onCompare: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(SunColors.Surface1).animateContentSize()) {
+    var moreOpen by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SunColors.Surface1)
+            .animateContentSize()
+            // 从底栏上滑打开书签，与 MT 一致；不消费事件，图标点击照常
+            .pointerInput(Unit) {
+                val threshold = 22.dp.toPx()
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var dy = 0f
+                    var fired = false
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        val c = e.changes.firstOrNull() ?: break
+                        if (c.changedToUpIgnoreConsumed()) break
+                        dy += c.positionChange().y
+                        if (!fired && dy < -threshold) {
+                            fired = true
+                            onSwipeUp()
+                        }
+                    }
+                }
+            }
+    ) {
         AnimatedVisibility(visible = selectionMode) {
             Row(
-                Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("已选 $selectedCount 项", color = SunColors.Accent, fontSize = 9.5.sp)
+                Spacer(Modifier.weight(1f))
+                MiniChip("全选", onSelectAll)
+                MiniChip("反选", onInvert)
+                MiniChip("类选", onSimilar)
             }
         }
         AnimatedContent(
@@ -1661,16 +1993,35 @@ private fun BottomBar(
             ) {
                 if (!selecting) {
                     BarIcon(Icons.AutoMirrored.Outlined.ArrowBack, "后退", canBack, onBack)
-                    BarIcon(Icons.Outlined.ArrowForward, "前进", canForward, onForward)
+                    BarIcon(Icons.AutoMirrored.Outlined.ArrowForward, "前进", canForward, onForward)
                     BarIcon(Icons.Outlined.Add, "新建", true, onNew)
-                    BarIcon(Icons.Outlined.SwapHoriz, "同步窗口", true, onSync)
-                    BarIcon(Icons.Outlined.ArrowUpward, "上一级", canUp, onUp)
+                    BarIcon(
+                        Icons.Outlined.SwapHoriz,
+                        "同步窗口（长按过滤）",
+                        true,
+                        onSync,
+                        active = filterActive,
+                        onLongClick = onFilter
+                    )
+                    BarIcon(Icons.Outlined.ArrowUpward, "上一级（长按跳转路径）", canUp, onUp, onLongClick = onGoto)
                 } else {
                     BarIcon(Icons.Outlined.ContentCopy, "复制", true, onCopy)
                     BarIcon(Icons.Outlined.ContentCut, "剪切", true, onCut)
                     BarIcon(Icons.Outlined.DriveFileRenameOutline, "重命名", selectedCount == 1, onRename)
                     BarIcon(Icons.Outlined.Delete, "删除", true, onDelete, danger = true)
-                    BarIcon(Icons.Outlined.Close, "取消", true, onCancel)
+                    Box {
+                        BarIcon(Icons.Outlined.MoreVert, "更多", true, { moreOpen = true })
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                            MenuLine("压缩", Icons.Outlined.Archive) { moreOpen = false; onCompress() }
+                            MenuLine("批量重命名", Icons.Outlined.DriveFileRenameOutline) { moreOpen = false; onBatchRename() }
+                            MenuLine("分享", Icons.Outlined.Share) { moreOpen = false; onShare() }
+                            if (selectedCount == 2) {
+                                MenuLine("对比", Icons.Outlined.SwapHoriz) { moreOpen = false; onCompare() }
+                            }
+                            MenuLine("属性", Icons.Outlined.Info) { moreOpen = false; onProperties() }
+                            MenuLine("取消选择", Icons.Outlined.Close) { moreOpen = false; onCancel() }
+                        }
+                    }
                 }
             }
         }
@@ -1678,17 +2029,45 @@ private fun BottomBar(
 }
 
 @Composable
+private fun MenuLine(label: String, icon: ImageVector, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = SunColors.TextPrimary, fontSize = 12.5.sp) },
+        leadingIcon = { Icon(icon, null, tint = SunColors.TextSecondary, modifier = Modifier.size(17.dp)) },
+        onClick = onClick
+    )
+}
+
+@Composable
+private fun MiniChip(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = SunColors.TextSecondary,
+        fontSize = 9.5.sp,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .clip(SunShapes.Small)
+            .background(SunColors.Surface3)
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun BarIcon(
     icon: ImageVector,
     label: String,
     enabled: Boolean,
     onClick: () -> Unit,
-    danger: Boolean = false
+    danger: Boolean = false,
+    active: Boolean = false,
+    onLongClick: (() -> Unit)? = null
 ) {
     val interaction = remember { MutableInteractionSource() }
     val tint = when {
         !enabled -> SunColors.TextTertiary.copy(alpha = 0.35f)
         danger -> SunColors.Danger
+        active -> SunColors.Accent
         else -> SunColors.TextSecondary
     }
     Box(
@@ -1696,11 +2075,13 @@ private fun BarIcon(
             .size(44.dp)
             .clip(CircleShape)
             .pressScale(interaction, 0.86f)
-            .clickable(
+            .combinedClickable(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
-                enabled = enabled
-            ) { onClick() },
+                enabled = enabled,
+                onLongClick = onLongClick,
+                onClick = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -1761,7 +2142,8 @@ private fun DrawerContent(
     onBookmarks: () -> Unit,
     onSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
-    onAbout: () -> Unit
+    onAbout: () -> Unit,
+    onTerminal: () -> Unit = {}
 ) {
     val shortcuts = listOf(
         Triple("内部存储", "/storage/emulated/0", Icons.Outlined.Storage),
@@ -1853,6 +2235,7 @@ private fun DrawerContent(
                 false,
                 onBookmarks
             )
+            DrawerItem(Icons.Outlined.Terminal, "终端", false, onTerminal)
             DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
             DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
             DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)
@@ -1932,6 +2315,23 @@ internal fun installApk(context: Context, file: File): Boolean {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+}
+
+internal fun shareFiles(context: Context, files: List<File>): Boolean {
+    if (files.isEmpty()) return false
+    return runCatching {
+        val uris = ArrayList<android.net.Uri>(files.size)
+        for (f in files) {
+            uris.add(FileProvider.getUriForFile(context, context.packageName + ".files", f))
+        }
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "*/*"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "分享 ${files.size} 个文件"))
         true
     }.getOrDefault(false)
 }

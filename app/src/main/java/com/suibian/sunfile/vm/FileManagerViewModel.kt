@@ -7,7 +7,9 @@ import com.suibian.sunfile.data.AppPrefs
 import com.suibian.sunfile.data.ClipItem
 import com.suibian.sunfile.data.FileEntry
 import com.suibian.sunfile.data.FileRepo
+import com.suibian.sunfile.data.OpenMode
 import com.suibian.sunfile.data.PrefsStore
+import com.suibian.sunfile.data.RenameExpr
 import com.suibian.sunfile.data.Shell
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.data.StorageStats
@@ -35,7 +37,11 @@ data class PaneState(
     val back: List<String> = emptyList(),
     val forward: List<String> = emptyList(),
     val token: Int = 0,
-    val navDirection: Int = 0
+    val navDirection: Int = 0,
+    /** MT 风格的过滤表达式，空表示不过滤 */
+    val filter: String = "",
+    /** 过滤前的完整列表，切换过滤条件时不必重新读盘 */
+    val allEntries: List<FileEntry> = emptyList()
 ) {
     // 列表可能上千项，计数只在真正用到时算一次
     val dirCount: Int by lazy { entries.count { it.isDir } }
@@ -185,9 +191,13 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                     _storage.value = withContext(Dispatchers.IO) { StorageStats.of(dir.absolutePath) }
                 }
                 mutate(index) {
+                    val spec = com.suibian.sunfile.data.Query.parse(it.filter)
                     it.copy(
                         path = dir.absolutePath,
-                        entries = listing.entries,
+                        allEntries = listing.entries,
+                        entries = if (spec.isActive) {
+                            listing.entries.filter { e -> com.suibian.sunfile.data.Query.matches(spec, e.name) }
+                        } else listing.entries,
                         loading = false,
                         firstLoad = false,
                         error = null,
@@ -329,6 +339,70 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun clearSelection(index: Int = _active.value) {
         mutate(index) { it.copy(selected = emptySet()) }
     }
+
+    /** 与 MT 的「类选」一致：按当前选中项的类型选中同目录下所有同类文件 */
+    fun selectSimilar(index: Int = _active.value) {
+        val pane = _panes.value[index]
+        val base = pane.selected.firstOrNull()
+            ?.let { path -> pane.entries.firstOrNull { it.path == path } }
+            ?: run {
+                _messages.tryEmit("先选中一个文件")
+                return
+            }
+        val ext = base.file.extension.lowercase()
+        val picked = pane.entries.filter { e ->
+            when {
+                base.isDir -> e.isDir
+                ext.isEmpty() -> !e.isDir && e.file.extension.isEmpty()
+                else -> !e.isDir && e.file.extension.equals(ext, true)
+            }
+        }.map { it.path }.toSet()
+        mutate(index) { it.copy(selected = picked) }
+        _messages.tryEmit("已选中 ${picked.size} 个${if (ext.isEmpty()) "同类项" else " .$ext"}")
+    }
+
+    /** 滑动多选：从 anchor 到当前行整段选中 */
+    fun selectRange(anchor: Int, to: Int, index: Int = _active.value) {
+        val pane = _panes.value[index]
+        if (pane.entries.isEmpty()) return
+        val a = anchor.coerceIn(0, pane.entries.lastIndex)
+        val b = to.coerceIn(0, pane.entries.lastIndex)
+        val lo = minOf(a, b)
+        val hi = maxOf(a, b)
+        mutate(index) { p ->
+            p.copy(selected = p.selected + p.entries.subList(lo, hi + 1).map { it.path })
+        }
+    }
+
+    fun selectAt(pos: Int, index: Int = _active.value) {
+        val pane = _panes.value[index]
+        val entry = pane.entries.getOrNull(pos) ?: return
+        mutate(index) { p -> p.copy(selected = p.selected + entry.path) }
+    }
+
+    fun isSelected(path: String, index: Int = _active.value): Boolean =
+        _panes.value[index].selected.contains(path)
+
+    // ---------------- 过滤 ----------------
+
+    fun setFilter(raw: String, index: Int = _active.value) {
+        mutate(index) { p ->
+            val spec = com.suibian.sunfile.data.Query.parse(raw)
+            p.copy(
+                filter = raw,
+                entries = if (spec.isActive) {
+                    p.allEntries.filter { e -> com.suibian.sunfile.data.Query.matches(spec, e.name) }
+                } else p.allEntries,
+                selected = emptySet(),
+                token = p.token + 1
+            )
+        }
+        if (raw.isNotBlank()) {
+            _messages.tryEmit("已过滤：${_panes.value[index].entries.size} 项")
+        }
+    }
+
+    fun clearFilter(index: Int = _active.value) = setFilter("", index)
 
     // ---------------- 剪贴板与批量操作 ----------------
 
@@ -524,6 +598,78 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 按 MT 表达式批量重命名，{P}{S}{1}{z1}{T:yyyyMMdd}{AP}… */
+    fun renameWithExpr(paths: List<String>, expr: String, onDone: (Int, Int) -> Unit = { _, _ -> }) {
+        if (paths.isEmpty() || _busy.value != null) return
+        val pm = getApplication<Application>().packageManager
+        viewModelScope.launch {
+            _busy.value = OpState("正在重命名…", "", 0, paths.size.toLong())
+            val result = withContext(Dispatchers.IO) {
+                val items = paths.map { p ->
+                    val f = File(p)
+                    RenameExpr.Item(
+                        name = f.name,
+                        lastModified = f.lastModified(),
+                        meta = if (f.extension.equals("apk", true)) apkMeta(pm, f) else null
+                    )
+                }
+                var ok = 0
+                var failed = 0
+                var lastError: String? = null
+                for ((i, p) in paths.withIndex()) {
+                    val f = File(p)
+                    val raw = RenameExpr.render(expr, items[i], i)
+                    val name = RenameExpr.sanitize(raw)
+                    if (name.isEmpty() || name == f.name) {
+                        _busy.value = OpState("正在重命名…", f.name, i + 1L, paths.size.toLong())
+                        continue
+                    }
+                    val parent = f.parentFile
+                    val target = when {
+                        parent == null -> null
+                        File(parent, name).exists() -> FileRepo.uniqueTarget(parent, name)
+                        else -> File(parent, name)
+                    }
+                    if (target == null) {
+                        failed++
+                        continue
+                    }
+                    runCatching { FileRepo.rename(f, target.name) }
+                        .onSuccess { ok++ }
+                        .onFailure {
+                            failed++
+                            lastError = it.message
+                        }
+                    _busy.value = OpState("正在重命名…", f.name, i + 1L, paths.size.toLong())
+                }
+                Triple(ok, failed, lastError)
+            }
+            _busy.value = null
+            mutate(_active.value) { it.copy(selected = emptySet()) }
+            refreshAll()
+            onDone(result.first, result.second)
+            _messages.tryEmit(
+                result.third ?: if (result.second > 0) "已重命名 ${result.first} 项，${result.second} 项跳过" else "已重命名 ${result.first} 项"
+            )
+        }
+    }
+
+    private fun apkMeta(pm: android.content.pm.PackageManager, file: File): RenameExpr.Meta? = runCatching {
+        @Suppress("DEPRECATION")
+        val info = pm.getPackageArchiveInfo(file.absolutePath, 0) ?: return null
+        val app = info.applicationInfo ?: return null
+        app.sourceDir = file.absolutePath
+        app.publicSourceDir = file.absolutePath
+        @Suppress("DEPRECATION")
+        val label = runCatching { pm.getApplicationLabel(app).toString() }.getOrNull()
+        RenameExpr.Meta(
+            appName = label,
+            packageName = info.packageName,
+            versionName = info.versionName,
+            versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+        )
+    }.getOrNull()
+
     fun create(createDir: Boolean, name: String, onDone: (File?) -> Unit = {}) {
         val parent = activePaneState.currentDir
         viewModelScope.launch {
@@ -579,6 +725,104 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             onDone()
             _messages.tryEmit(result.fold({ "已压缩 $it 个文件" }, { it.message ?: "压缩失败" }))
         }
+    }
+
+    /** 按选定格式创建压缩包：zip / tar / tar.gz */
+    fun compressAs(
+        paths: List<String>,
+        name: String,
+        format: com.suibian.sunfile.data.ArchiveEdit.Format,
+        onDone: () -> Unit = {}
+    ) {
+        if (paths.isEmpty() || _busy.value != null) return
+        val destDir = activePaneState.currentDir
+        val base = name.trim().ifEmpty { "archive" }
+        val fileName = if (base.endsWith(".${format.ext}", true)) base else "$base.${format.ext}"
+        viewModelScope.launch {
+            _busy.value = OpState("正在打包…", "", 0, 0)
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dest = FileRepo.uniqueTarget(destDir, fileName)
+                    com.suibian.sunfile.data.ArchiveEdit.create(paths.map { File(it) }, dest, format) { n, done, total ->
+                        _busy.value = OpState("正在打包…", n, done.toLong(), total.toLong())
+                    }
+                }
+            }
+            _busy.value = null
+            mutate(_active.value) { it.copy(selected = emptySet()) }
+            refreshAll()
+            onDone()
+            _messages.tryEmit(result.fold({ "已打包 $it 项为 ${format.label}" }, { it.message ?: "打包失败" }))
+        }
+    }
+
+    /** zip 内删除若干条目（含目录前缀） */
+    fun zipDeleteEntries(zip: File, names: List<String>, onDone: () -> Unit = {}) {
+        if (names.isEmpty() || _busy.value != null) return
+        viewModelScope.launch {
+            _busy.value = OpState("正在更新压缩包…", "", 0, 1)
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { com.suibian.sunfile.data.ArchiveEdit.zipDelete(zip, names.toSet()) }.getOrDefault(false)
+            }
+            _busy.value = null
+            onDone()
+            _messages.tryEmit(if (ok) "已从压缩包删除 ${names.size} 项" else "更新压缩包失败")
+        }
+    }
+
+    /** 压缩包内重命名；改完整路径即可实现移动 */
+    fun zipRenameEntry(zip: File, oldName: String, newName: String, onDone: (Boolean) -> Unit = {}) {
+        if (_busy.value != null) return
+        viewModelScope.launch {
+            _busy.value = OpState("正在更新压缩包…", "", 0, 1)
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { com.suibian.sunfile.data.ArchiveEdit.zipRename(zip, oldName, newName) }.getOrDefault(false)
+            }
+            _busy.value = null
+            onDone(ok)
+            _messages.tryEmit(if (ok) "已重命名" else "重命名失败，检查名称是否重复")
+        }
+    }
+
+    /** 编辑器保存后把内容写回压缩包条目 */
+    fun zipPutEntry(zip: File, entry: String, bytes: ByteArray, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            _busy.value = OpState("正在写回压缩包…", entry, 0, 1)
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { com.suibian.sunfile.data.ArchiveEdit.zipPut(zip, entry, bytes) }.getOrDefault(false)
+            }
+            _busy.value = null
+            onDone(ok)
+            _messages.tryEmit(if (ok) "已更新压缩包内的 $entry" else "写回失败")
+        }
+    }
+
+    fun zipAddFiles(zip: File, paths: List<String>, onDone: (Int) -> Unit = {}) {
+        if (paths.isEmpty() || _busy.value != null) return
+        viewModelScope.launch {
+            _busy.value = OpState("正在添加到压缩包…", "", 0, paths.size.toLong())
+            val count = withContext(Dispatchers.IO) {
+                runCatching { com.suibian.sunfile.data.ArchiveEdit.zipAdd(zip, paths.map { File(it) }) }.getOrDefault(0)
+            }
+            _busy.value = null
+            onDone(count)
+            _messages.tryEmit(if (count > 0) "已添加 $count 个文件" else "没有可添加的文件")
+        }
+    }
+
+    /** 设置某类型的默认打开方式，同时镜像到 SunMT2/openMethod */
+    fun setOpenWith(ext: String, mode: OpenMode?) {
+        prefsStore.setOpenWith(ext, mode)
+        val ctx = getApplication<Application>()
+        if (mode == null) com.suibian.sunfile.data.Mt2.clearOpenMethod(ctx, ext)
+        else com.suibian.sunfile.data.Mt2.writeOpenMethod(ctx, ext, mode.name)
+    }
+
+    fun clearAllOpenWith() {
+        val ctx = getApplication<Application>()
+        prefsStore.prefs.value.openWith.keys.forEach { com.suibian.sunfile.data.Mt2.clearOpenMethod(ctx, it) }
+        prefsStore.clearOpenWith()
+        _messages.tryEmit("已清除全部默认打开方式")
     }
 
     suspend fun checksumOf(file: File, algorithm: String): String = withContext(Dispatchers.IO) {

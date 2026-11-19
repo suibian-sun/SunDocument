@@ -45,7 +45,9 @@ data class EditorState(
     /** 文件还有未载入的尾段 */
     val partial: Boolean = false,
     val loadingMore: Boolean = false,
-    val bom: Boolean = false
+    val bom: Boolean = false,
+    /** 写出文件时使用的换行符：LF / CRLF */
+    val newline: String = "LF"
 ) {
     val dirty: Boolean get() = file != null && text != baseline
     val hasMore: Boolean get() = partial && loadedBytes < totalBytes
@@ -233,14 +235,19 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val cs = runCatching { Charset.forName(s.encoding) }.getOrDefault(Charsets.UTF_8)
+                    val payload = if (s.newline == "CRLF") {
+                        content.replace("\r\n", "\n").replace("\n", "\r\n")
+                    } else {
+                        content.replace("\r\n", "\n")
+                    }
                     if (s.partial) {
-                        val bytes = content.toByteArray(cs)
+                        val bytes = payload.toByteArray(cs)
                         val ok = FileRepo.writeHeadAndTail(file, bytes, s.loadedBytes, s.bom)
                         if (ok) (if (s.bom) 3 else 0) + bytes.size else -1
                     } else {
                         val previous = runCatching { FileRepo.readText(file) }.getOrNull()
                         if (previous != null && previous != content) history.snapshot(file, previous)
-                        FileRepo.writeText(file, content, s.encoding)
+                        FileRepo.writeText(file, payload, s.encoding)
                         0
                     }
                 }
@@ -355,6 +362,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         if (name == _state.value.encoding) return
         open(f, name)
         _toast.tryEmit("已按 $name 重新读取")
+    }
+
+    fun setNewline(mode: String) {
+        val m = if (mode.equals("CRLF", true)) "CRLF" else "LF"
+        if (m == _state.value.newline) return
+        _state.value = _state.value.copy(newline = m)
+        _toast.tryEmit("保存时使用 ${if (m == "CRLF") "CRLF" else "LF"}")
     }
 
     fun reset() {

@@ -70,7 +70,9 @@ fun SettingsPage(
     onClearOpenWith: () -> Unit,
     onClearRecent: () -> Unit,
     onRequestRoot: () -> Unit,
-    onAbout: () -> Unit
+    onAbout: () -> Unit,
+    dataDir: String = "",
+    onOpenWithManager: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -140,9 +142,14 @@ fun SettingsPage(
             )
 
             SectionTitle("打开方式")
-            InfoRow("记住的选择", "在「打开方式」里勾选后按扩展名记住，共 ${prefs.openWith.size} 个")
+            ValueRow("默认打开方式", "${prefs.openWith.size} 个类型已指定 · 点击管理", onOpenWithManager)
+            InfoRow("记住的选择", "面板里勾选或长按即可按扩展名记住")
             ValueRow("清除记住的打开方式", "恢复为按类型自动判断", onClearOpenWith)
             ValueRow("清除最近访问", "${prefs.recent.size} 条记录", onClearRecent)
+
+            SectionTitle("数据目录")
+            InfoRow("SunMT2", dataDir.ifEmpty { "初始化中…" })
+            InfoRow("内容", "openMethod 默认打开方式、logs/DEBUG.log 崩溃日志")
 
             SectionTitle("关于")
             ValueRow("版本", "v${BuildConfig.VERSION_NAME}", onAbout)

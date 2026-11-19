@@ -7,7 +7,9 @@ import android.widget.Toast
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +32,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CreateNewFolder
@@ -41,9 +48,9 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.TextFields
@@ -97,6 +104,7 @@ sealed interface SheetKind {
     data class Entry(val entry: FileEntry) : SheetKind
     data class OpenWith(val file: File) : SheetKind
     data class Apk(val file: File) : SheetKind
+    data object OpenWithManager : SheetKind
 }
 
 sealed interface DialogKind {
@@ -109,6 +117,9 @@ sealed interface DialogKind {
     data class BatchRename(val paths: List<String>) : DialogKind
     data class Checksum(val file: File) : DialogKind
     data class Chmod(val file: File, val current: String?) : DialogKind
+    data class ZipRename(val zip: File, val entry: String) : DialogKind
+    data class Filter(val current: String) : DialogKind
+    data class Goto(val current: String) : DialogKind
     data object About : DialogKind
 }
 
@@ -449,72 +460,100 @@ fun BookmarkSheet(
     }
 }
 
-/** 打开方式选择：仿 MT 管理器的「打开方式」弹窗 */
+/** 打开方式选择：仿 MT 的弹窗，长按某项即可设为该类型的默认方式 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OpenWithSheet(
     file: File,
     remembered: OpenMode?,
     onDismiss: () -> Unit,
     onPick: (OpenMode) -> Unit,
-    onPickAndRemember: (OpenMode) -> Unit
+    onPickAndRemember: (OpenMode) -> Unit,
+    onSetDefault: (OpenMode) -> Unit = {},
+    onManage: () -> Unit = {}
 ) {
     var remember by remember { mutableStateOf(false) }
     val rawExt = FileKinds.extensionOf(file)
     val extLabel = if (rawExt.isEmpty()) "" else ".$rawExt"
+    val kind = FileKinds.kindOf(file)
     val modes = buildList {
         add(OpenMode.TEXT)
         add(OpenMode.HEX)
-        when (FileKinds.kindOf(file)) {
+        when (kind) {
             com.suibian.sunfile.data.FileKind.IMAGE -> add(OpenMode.IMAGE)
             com.suibian.sunfile.data.FileKind.AUDIO -> add(OpenMode.AUDIO)
             com.suibian.sunfile.data.FileKind.VIDEO -> add(OpenMode.VIDEO)
             com.suibian.sunfile.data.FileKind.OFFICE ->
                 if (FileKinds.isDocumentReadable(file)) add(OpenMode.DOCUMENT)
+            com.suibian.sunfile.data.FileKind.APK -> {
+                add(OpenMode.INFO)
+                add(OpenMode.AXML)
+                add(OpenMode.DEX)
+            }
             else -> Unit
         }
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
         add(OpenMode.EXTERNAL)
     }
     Sheet(onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "打开方式",
+                    color = SunColors.TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    file.name + (if (remembered != null) " · 默认：${remembered.label}" else ""),
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Text(
-                "打开方式",
-                color = SunColors.TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                "${file.name} · $extLabel" .trimEnd(' ', '·') +
-                    if (remembered != null) " · 当前默认：${remembered.label}" else "",
-                color = SunColors.TextTertiary,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                "管理",
+                color = SunColors.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .clip(SunShapes.Small)
+                    .clickable { onManage() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         modes.forEach { mode ->
+            val isDefault = remembered == mode
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        if (remember) onPickAndRemember(mode) else onPick(mode)
-                    }
-                    .padding(horizontal = 20.dp, vertical = 13.dp),
+                    .combinedClickable(
+                        onLongClick = { onSetDefault(mode) },
+                        onClick = { if (remember) onPickAndRemember(mode) else onPick(mode) }
+                    )
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     modeIcon(mode),
                     null,
-                    tint = SunColors.TextSecondary,
+                    tint = if (isDefault) SunColors.Accent else SunColors.TextSecondary,
                     modifier = Modifier.size(19.dp)
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(mode.label, color = SunColors.TextPrimary, fontSize = 13.sp)
+                    Text(
+                        mode.label,
+                        color = if (isDefault) SunColors.Accent else SunColors.TextPrimary,
+                        fontSize = 13.sp
+                    )
                     Text(modeHint(mode), color = SunColors.TextTertiary, fontSize = 9.sp)
                 }
-                if (remembered == mode) {
+                if (isDefault) {
                     Icon(Icons.Default.Check, null, tint = SunColors.Accent, modifier = Modifier.size(16.dp))
                 }
             }
@@ -523,7 +562,7 @@ fun OpenWithSheet(
             Modifier
                 .fillMaxWidth()
                 .clickable { remember = !remember }
-                .padding(horizontal = 20.dp, vertical = 10.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Checkbox(
@@ -540,6 +579,73 @@ fun OpenWithSheet(
                 fontSize = 11.5.sp
             )
         }
+        Text(
+            "长按任意方式可直接设为 .${rawExt.ifEmpty { "无扩展名" }} 的默认",
+            color = SunColors.TextTertiary,
+            fontSize = 9.sp,
+            modifier = Modifier.padding(start = 20.dp, bottom = 8.dp)
+        )
+    }
+}
+
+/** 默认打开方式管理：列出已记住的类型，可逐条删除或全部清除 */
+@Composable
+fun OpenWithManagerSheet(
+    mapping: Map<String, OpenMode>,
+    onRemove: (String) -> Unit,
+    onClearAll: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Sheet(onDismiss) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("默认打开方式", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (mapping.isEmpty()) "还没有为任何类型指定默认方式" else "${mapping.size} 个类型已指定",
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.5.sp
+                )
+            }
+            if (mapping.isNotEmpty()) {
+                Text(
+                    "全部清除",
+                    color = SunColors.Danger,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { onClearAll() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+        mapping.entries.sortedBy { it.key }.forEach { (ext, mode) ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    ".${ext.ifEmpty { "无扩展名" }}",
+                    color = SunColors.TextPrimary,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.width(110.dp)
+                )
+                Text(mode.label, color = SunColors.TextSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                Icon(
+                    Icons.Outlined.Close,
+                    null,
+                    tint = SunColors.TextTertiary,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .clickable { onRemove(ext) }
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
     }
 }
 
@@ -551,6 +657,9 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.VIDEO -> Icons.Outlined.Movie
     OpenMode.DOCUMENT -> Icons.Outlined.Description
     OpenMode.ARCHIVE -> Icons.Outlined.Archive
+    OpenMode.AXML -> Icons.Outlined.Code
+    OpenMode.DEX -> Icons.Outlined.DataObject
+    OpenMode.INFO -> Icons.Outlined.Android
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
 
@@ -562,6 +671,9 @@ private fun modeHint(mode: OpenMode) = when (mode) {
     OpenMode.VIDEO -> "全屏播放，左右滑动切换"
     OpenMode.DOCUMENT -> "直接读取 Word / Excel / PPT 内容"
     OpenMode.ARCHIVE -> "浏览 zip / tar 内部文件并解压"
+    OpenMode.AXML -> "把二进制 XML 还原成可读文本"
+    OpenMode.DEX -> "查看类、方法、字段与字符串"
+    OpenMode.INFO -> "包名、签名、权限、组件一览"
     OpenMode.EXTERNAL -> "交给系统中已安装的应用"
 }
 
@@ -739,35 +851,56 @@ fun PropertiesDialog(
 @Composable
 fun CompressDialog(
     paths: List<String>,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, com.suibian.sunfile.data.ArchiveEdit.Format) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val default = when (paths.size) {
-        1 -> File(paths.first()).name.substringBeforeLast('.').ifEmpty { "archive" } + ".zip"
-        else -> "archive.zip"
+    val stem = when (paths.size) {
+        1 -> File(paths.first()).name.substringBeforeLast('.').ifEmpty { "archive" }
+        else -> "archive"
     }
-    var name by remember { mutableStateOf(default) }
+    var format by remember { mutableStateOf(com.suibian.sunfile.data.ArchiveEdit.Format.ZIP) }
+    var name by remember { mutableStateOf(stem) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("压缩为 ZIP", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("压缩 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
-                Text("共 ${paths.size} 项", color = SunColors.TextTertiary, fontSize = 10.sp)
-                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.suibian.sunfile.data.ArchiveEdit.Format.entries.forEach { f ->
+                        val active = f == format
+                        Text(
+                            f.label,
+                            color = if (active) SunColors.Accent else SunColors.TextSecondary,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .background(if (active) SunColors.AccentSoft else SunColors.Surface3)
+                                .clickable { format = f }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 SunTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = "压缩包名称",
+                    label = "名称（自动补 .${format.ext}）",
                     modifier = Modifier.fillMaxWidth(),
                     mono = true
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (format == com.suibian.sunfile.data.ArchiveEdit.Format.ZIP) "逐条写入，支持空目录" else "按 512 字节块写入，保留修改时间",
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.sp
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim()) }) {
-                Text("开始压缩", color = SunColors.Accent, fontSize = 13.sp)
+            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), format) }) {
+                Text("开始", color = SunColors.Accent, fontSize = 13.sp)
             }
         },
         dismissButton = {
@@ -779,48 +912,74 @@ fun CompressDialog(
 @Composable
 fun BatchRenameDialog(
     paths: List<String>,
-    onConfirm: (String, String) -> Unit,
+    onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var find by remember { mutableStateOf("") }
-    var replace by remember { mutableStateOf("") }
-    val sample = paths.take(3).map { File(it).name.replace(find, replace) }
+    var expr by remember { mutableStateOf(com.suibian.sunfile.data.RenameExpr.DEFAULT_EXPR) }
+    val items = remember(paths) {
+        paths.map { p ->
+            val f = File(p)
+            com.suibian.sunfile.data.RenameExpr.Item(f.name, f.lastModified())
+        }
+    }
+    val preview = remember(expr, paths) {
+        runCatching { com.suibian.sunfile.data.RenameExpr.preview(expr, items) }.getOrDefault(emptyList())
+    }
+    val tokens = listOf("{P}", "{S}", "{1}", "{z1}", "{T:yyyyMMdd}", "{AP}")
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("批量重命名 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = {
+            Column {
+                Text("批量重命名 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text("表达式决定新文件名，{P} 原名、{S} 后缀、{1} 递增", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+            }
+        },
         text = {
             Column {
                 SunTextField(
-                    value = find,
-                    onValueChange = { find = it },
-                    label = "查找",
-                    modifier = Modifier.fillMaxWidth()
+                    value = expr,
+                    onValueChange = { expr = it },
+                    label = "重命名表达式",
+                    modifier = Modifier.fillMaxWidth(),
+                    mono = true
                 )
                 Spacer(Modifier.height(8.dp))
-                SunTextField(
-                    value = replace,
-                    onValueChange = { replace = it },
-                    label = "替换为（留空即删除）",
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    tokens.forEach { t ->
+                        Text(
+                            t,
+                            color = SunColors.TextSecondary,
+                            fontSize = 9.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .background(SunColors.Surface3)
+                                .clickable { expr = expr + t }
+                                .padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 Text("预览", color = SunColors.TextTertiary, fontSize = 9.5.sp)
-                sample.forEach { s ->
+                preview.take(5).forEachIndexed { i, n ->
                     Text(
-                        s,
-                        color = SunColors.TextSecondary,
-                        fontSize = 10.5.sp,
+                        "${File(paths[i]).name}  →  $n",
+                        color = if (n == File(paths[i]).name) SunColors.TextTertiary else SunColors.TextSecondary,
+                        fontSize = 9.5.sp,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (preview.size > 5) {
+                    Text("… 其余 ${preview.size - 5} 项", color = SunColors.TextTertiary, fontSize = 9.sp)
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (find.isNotEmpty()) onConfirm(find, replace) }) {
+            TextButton(onClick = { if (expr.isNotBlank()) onConfirm(expr) }) {
                 Text("重命名", color = SunColors.Accent, fontSize = 13.sp)
             }
         },
