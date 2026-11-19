@@ -454,7 +454,6 @@ private fun ZoomableImage(file: File, onSwipe: (Int) -> Unit) {
                     .pointerInput(Unit) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            var acc = 1f
                             var dx = 0f
                             var multi = false
                             while (true) {
@@ -463,19 +462,23 @@ private fun ZoomableImage(file: File, onSwipe: (Int) -> Unit) {
                                     multi = true
                                     val z = e.calculateZoom()
                                     if (z > 0f && z != 1f) {
-                                        acc = (acc * z).coerceIn(0.5f, 1.6f)
+                                        scale = (scale * z).coerceIn(1f, 8f)
+                                        if (scale <= 1.01f) offset = Offset.Zero
                                         e.changes.forEach { it.consume() }
                                     }
                                 } else if (!multi && e.changes.size == 1) {
-                                    dx += e.changes[0].positionChange().x
+                                    val d = e.changes[0].positionChange()
+                                    if (scale > 1.01f) {
+                                        // 放大后单指拖动用来平移画面
+                                        offset += d
+                                        e.changes[0].consume()
+                                    } else {
+                                        dx += d.x
+                                    }
                                 }
                                 if (e.changes.none { it.pressed }) break
                             }
-                            if (multi) {
-                                val next = (scale * acc).coerceIn(1f, 8f)
-                                scale = next
-                                if (next <= 1.01f) offset = Offset.Zero
-                            } else if (swipeEnabled.value && abs(dx) > threshold) {
+                            if (!multi && swipeEnabled.value && abs(dx) > threshold) {
                                 onSwipe(if (dx < 0) 1 else -1)
                             }
                         }
