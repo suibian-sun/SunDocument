@@ -28,6 +28,12 @@ class PrefsStore(context: Context) {
         autoCheckUpdate = sp.getBoolean("auto_check_update", true)
     )
 
+    fun lastPath(pane: Int): String? = sp.getString("last_path_$pane", null)
+
+    fun saveLastPath(pane: Int, path: String) {
+        sp.edit().putString("last_path_$pane", path).apply()
+    }
+
     fun update(block: (AppPrefs) -> AppPrefs) {
         val next = block(_prefs.value)
         _prefs.value = next

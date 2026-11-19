@@ -25,7 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
@@ -34,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
@@ -281,8 +281,11 @@ fun FileManagerScreen(
                 ActionButton(Icons.Default.Delete, "删除", enabled = selectedCount > 0, danger = true) {
                     deletePaths = active.selected.toList()
                 }
-                ActionButton(Icons.Default.CreateNewFolder, "新建", enabled = active.path.isNotEmpty()) {
+                ActionButton(Icons.Default.CreateNewFolder, "新建夹", enabled = active.path.isNotEmpty()) {
                     newFolderPane = activePane
+                }
+                ActionButton(Icons.Default.NoteAdd, "新建文件", enabled = active.path.isNotEmpty()) {
+                    newFilePane = activePane
                 }
                 ActionButton(Icons.Default.DriveFileRenameOutline, "重命名", enabled = singleSelected != null) {
                     renameTarget = singleSelected
@@ -303,9 +306,7 @@ fun FileManagerScreen(
                 ActionButton(Icons.Default.Refresh, "刷新", enabled = true) {
                     vm.refresh(activePane)
                 }
-                ActionButton(Icons.Default.Close, "新建文件", enabled = active.path.isNotEmpty()) {
-                    newFilePane = activePane
-                }
+
             }
         }
 

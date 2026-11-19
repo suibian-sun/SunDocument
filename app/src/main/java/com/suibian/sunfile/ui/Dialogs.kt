@@ -101,8 +101,7 @@ fun PathDialog(
     val shortcuts = listOf(
         "内部存储" to "/storage/emulated/0",
         "下载" to "/storage/emulated/0/Download",
-        "根目录" to "/",
-        "应用目录" to "/data/data/com.suibian.sunfile"
+        "根目录" to "/"
     )
     AlertDialog(
         onDismissRequest = onDismiss,

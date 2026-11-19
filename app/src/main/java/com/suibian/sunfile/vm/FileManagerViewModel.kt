@@ -69,14 +69,16 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun init(hasAllFilesAccess: Boolean) {
         if (initialized) return
         initialized = true
-        val start = if (hasAllFilesAccess) {
+        val fallback = if (hasAllFilesAccess) {
             FileRepo.startDir(true).absolutePath
         } else {
             getApplication<Application>().getExternalFilesDir(null)?.absolutePath
                 ?: getApplication<Application>().filesDir.absolutePath
         }
-        navigate(0, start)
-        navigate(1, start)
+        for (i in 0..1) {
+            val remembered = prefsStore.lastPath(i)?.takeIf { File(it).isDirectory && File(it).canRead() }
+            navigate(i, remembered ?: fallback)
+        }
     }
 
     fun pane(index: Int): PaneState = _panes.value[index]
@@ -94,6 +96,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { FileRepo.list(dir, cfg.showHidden, cfg.sort) }
             }
             result.onSuccess { list ->
+                prefsStore.saveLastPath(index, dir.absolutePath)
                 mutatePane(index) {
                     it.copy(
                         path = dir.absolutePath,
