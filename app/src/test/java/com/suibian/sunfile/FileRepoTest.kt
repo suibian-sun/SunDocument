@@ -219,16 +219,39 @@ class FileRepoTest {
     }
 
     @Test
-    fun `large text is truncated and read only`() {
+    fun `large text is paged and fully traversable`() {
         val f = File(root, "big.log")
-        val content = "x".repeat(3 * 1024 * 1024)
+        val lines = 320_000
+        val content = buildString {
+            repeat(lines) { append("line ").append(it).append("\n") }
+        }
         f.writeText(content)
         val smart = FileRepo.readTextSmart(f)
-        assertTrue(smart.truncated)
-        assertFalse(smart.editable)
+        // 不再截断丢弃：标记为分页，且页内容可达
+        assertTrue(smart.paged)
+        assertTrue(smart.editable)
+        assertFalse(smart.truncated)
+        assertEquals(f.length(), smart.totalBytes)
         assertTrue(smart.text.isNotEmpty())
-        assertTrue(smart.text.length <= 300 * 1024)
-        assertEquals(3L * 1024 * 1024, smart.totalBytes)
+
+        // 逐页翻完，拼起来必须等于原文
+        val sb = StringBuilder()
+        var guard = 0
+        while (guard < 500) {
+            guard++
+            val page = FileRepo.readPage(f, guard - 1)
+            sb.append(page.text)
+            if (page.lastPage) break
+        }
+        assertEquals(content, sb.toString())
+
+        // 分页保存：改第一页并写回，文件总体长度随内容变化，其余内容不受影响
+        val first = FileRepo.readPage(f, 0)
+        val replaced = "PATCHED-" + first.text.removePrefix("line 0\n")
+        assertTrue(FileRepo.writePage(f, first, replaced))
+        val after = FileRepo.readPage(f, 0)
+        assertTrue(after.text.startsWith("PATCHED-"))
+        assertTrue(f.length() != content.length.toLong())
     }
 
     @Test

@@ -40,6 +40,7 @@ import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 import com.suibian.sunfile.util.Fmt
+import com.suibian.sunfile.vm.SearchMode
 import com.suibian.sunfile.vm.SearchUiState
 
 @Composable
@@ -49,7 +50,9 @@ fun SearchPage(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onCancel: () -> Unit,
-    onResult: (FileEntry) -> Unit
+    onResult: (FileEntry) -> Unit,
+    onModeChange: (SearchMode) -> Unit,
+    onContentResult: (com.suibian.sunfile.data.FileRepo.ContentHit) -> Unit
 ) {
     Column(
         Modifier
@@ -88,6 +91,24 @@ fun SearchPage(
             }
         }
 
+        // 模式切换：名称 / 内容
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
+            SearchMode.values().forEach { mode ->
+                val active = mode == state.mode
+                Text(
+                    mode.label,
+                    color = if (active) SunColors.Surface4 else SunColors.TextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .clip(SunShapes.Pill)
+                        .background(if (active) SunColors.Accent else SunColors.Surface2)
+                        .clickable { onModeChange(mode) }
+                        .padding(horizontal = 13.dp, vertical = 6.dp)
+                )
+            }
+        }
+
         if (state.running) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
                 LinearProgressIndicator(
@@ -122,6 +143,65 @@ fun SearchPage(
         }
 
         when {
+            state.mode == SearchMode.CONTENT && state.contentHits.isNotEmpty() -> LazyColumn(
+                contentPadding = PaddingValues(bottom = 12.dp)
+            ) {
+                item {
+                    Text(
+                        "${state.contentHits.size} 处命中",
+                        color = SunColors.TextTertiary,
+                        fontSize = 9.5.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                items(state.contentHits.size) { idx ->
+                    val hit = state.contentHits[idx]
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onContentResult(hit) }
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            "${hit.line}",
+                            color = SunColors.Accent,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.width(38.dp).padding(top = 1.dp)
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                hit.file.name,
+                                color = SunColors.TextPrimary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                hit.preview,
+                                color = SunColors.TextSecondary,
+                                fontSize = 9.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            state.finished && state.mode == SearchMode.CONTENT && state.contentHits.isEmpty() -> Column(
+                Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.Search, null, tint = SunColors.Surface4, modifier = Modifier.size(46.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("没有匹配的内容", color = SunColors.TextTertiary, fontSize = 11.5.sp)
+                Text("已扫描 ${state.scanned} 项", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+            }
+
             state.finished && state.results.isEmpty() -> Column(
                 Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,

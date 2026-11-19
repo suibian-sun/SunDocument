@@ -12,7 +12,9 @@ data class FileEntry(
     val isHidden: Boolean,
     val canRead: Boolean,
     val canWrite: Boolean,
-    val childCount: Int = 0
+    val childCount: Int = 0,
+    /** 权限串（如 rw-r--r--），仅在通过 shell 枚举时可用 */
+    val mode: String? = null
 ) {
     val path: String get() = file.absolutePath
 }

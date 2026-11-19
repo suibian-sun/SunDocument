@@ -68,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +83,7 @@ import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
+import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.util.Fmt
 import java.io.File
 
@@ -92,6 +94,7 @@ sealed interface SheetKind {
     data object Bookmarks : SheetKind
     data class Entry(val entry: FileEntry) : SheetKind
     data class OpenWith(val file: File) : SheetKind
+    data class Apk(val file: File) : SheetKind
 }
 
 sealed interface DialogKind {
@@ -103,6 +106,7 @@ sealed interface DialogKind {
     data class Compress(val paths: List<String>) : DialogKind
     data class BatchRename(val paths: List<String>) : DialogKind
     data class Checksum(val file: File) : DialogKind
+    data class Chmod(val file: File, val current: String?) : DialogKind
     data object About : DialogKind
 }
 
@@ -888,6 +892,159 @@ fun AboutDialog(version: String, onDismiss: () -> Unit, onCheckUpdate: () -> Uni
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("关闭", color = SunColors.TextSecondary, fontSize = 13.sp) }
+        }
+    )
+}
+
+// ---------------- APK 详情 ----------------
+
+@Composable
+fun ApkSheet(file: File, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val meta by androidx.compose.runtime.produceState<com.suibian.sunfile.util.ApkMeta?>(
+        initialValue = null, file
+    ) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.suibian.sunfile.util.ApkInspector.read(context, file)
+        }
+    }
+    Sheet(onDismiss) {
+        val m = meta
+        if (m == null) {
+            Row(
+                Modifier.fillMaxWidth().padding(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(Modifier.size(16.dp), color = SunColors.Accent, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("正在解析安装包…", color = SunColors.TextSecondary, fontSize = 12.sp)
+            }
+            return@Sheet
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val icon = m.icon
+            Box(
+                Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SunColors.Surface2),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = icon.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp)
+                    )
+                } else {
+                    Icon(Icons.Outlined.Terminal, null, tint = SunColors.TextTertiary, modifier = Modifier.size(22.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    m.label,
+                    color = SunColors.TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    m.packageName,
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            MetaCell("版本", (m.versionName ?: "—") + " (${m.versionCode})", Modifier.weight(1f))
+            MetaCell("SDK", "min ${m.minSdk} · target ${m.targetSdk}", Modifier.weight(1f))
+            MetaCell("大小", Fmt.size(file.length()), Modifier.weight(1f))
+        }
+
+        if (m.permissions.isNotEmpty()) {
+            Text(
+                "权限 ${m.permissions.size}",
+                color = SunColors.TextTertiary,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp)
+            )
+            Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+                m.permissions.take(120).forEach { p ->
+                    Text(
+                        p,
+                        color = SunColors.TextSecondary,
+                        fontSize = 9.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun MetaCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, color = SunColors.TextTertiary, fontSize = 8.5.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(value, color = SunColors.TextPrimary, fontSize = 10.5.sp, style = NumberStyle, maxLines = 1)
+    }
+}
+
+// ---------------- 权限修改 ----------------
+
+@Composable
+fun ChmodDialog(
+    file: File,
+    current: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var mode by remember { mutableStateOf("644") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = { Text("修改权限", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        text = {
+            Column {
+                Text(
+                    current?.let { "当前 $it" } ?: file.name,
+                    color = SunColors.TextTertiary,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(10.dp))
+                SunTextField(
+                    value = mode,
+                    onValueChange = { mode = it.filter { c -> c in '0'..'7' }.take(4) },
+                    label = "八进制权限，如 644 / 755",
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(mode) },
+                enabled = mode.length in 3..4
+            ) { Text("应用", color = SunColors.Accent, fontSize = 13.sp) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp) }
         }
     )
 }

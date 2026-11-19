@@ -32,6 +32,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +51,7 @@ import com.suibian.sunfile.update.UpdateState
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
+import com.suibian.sunfile.ui.theme.ThemeMode
 import com.suibian.sunfile.util.Fmt
 import java.io.File
 
@@ -61,8 +65,11 @@ fun SettingsPage(
     onToggleAutoCheck: () -> Unit,
     onToggleAccelerator: () -> Unit,
     onCheckUpdate: () -> Unit,
-    onEditorPrefs: (Int?, Boolean?, Boolean?) -> Unit,
+    onEditorPrefs: (Int?, Boolean?, Boolean?, Boolean?) -> Unit,
+    onThemeChange: (ThemeMode) -> Unit,
     onClearOpenWith: () -> Unit,
+    onClearRecent: () -> Unit,
+    onRequestRoot: () -> Unit,
     onAbout: () -> Unit
 ) {
     Column(
@@ -88,6 +95,9 @@ fun SettingsPage(
         }
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            SectionTitle("外观")
+            ThemeSegmented(prefs.themeMode, onThemeChange)
+
             SectionTitle("浏览")
             SwitchRow("显示隐藏文件", "以 . 开头的文件和目录", showHidden, onToggleHidden)
             ValueRow("排序方式", "${prefs.sort.mode.label}${if (prefs.sort.ascending) " · 升序" else " · 降序"}", onSort)
@@ -108,20 +118,31 @@ fun SettingsPage(
                         prefs.editorFontSize < 18 -> 18
                         else -> 12
                     }
-                    onEditorPrefs(next, null, null)
+                    onEditorPrefs(next, null, null, null)
                 }
             )
             SwitchRow("自动换行", "长行自动折行显示", prefs.editorWrap) {
-                onEditorPrefs(null, !prefs.editorWrap, null)
+                onEditorPrefs(null, !prefs.editorWrap, null, null)
             }
             SwitchRow("显示行号", "关闭后更适合阅读长段落", prefs.editorLineNumbers) {
-                onEditorPrefs(null, null, !prefs.editorLineNumbers)
+                onEditorPrefs(null, null, !prefs.editorLineNumbers, null)
+            }
+            SwitchRow("代码补全", "按上下文给出关键字、符号与片段", prefs.editorCompletion) {
+                onEditorPrefs(null, null, null, !prefs.editorCompletion)
             }
             InfoRow("修改历史", "保存前自动留档，单个文件保留最近 30 个版本")
+
+            SectionTitle("系统访问")
+            ValueRow(
+                "Root 权限",
+                if (com.suibian.sunfile.data.Shell.rootAvailable) "已获取 · 可读取全部目录" else "未获取 · 点击申请",
+                onRequestRoot
+            )
 
             SectionTitle("打开方式")
             InfoRow("记住的选择", "在「打开方式」里勾选后按扩展名记住，共 ${prefs.openWith.size} 个")
             ValueRow("清除记住的打开方式", "恢复为按类型自动判断", onClearOpenWith)
+            ValueRow("清除最近访问", "${prefs.recent.size} 条记录", onClearRecent)
 
             SectionTitle("关于")
             ValueRow("版本", "v${BuildConfig.VERSION_NAME}", onAbout)
@@ -403,4 +424,41 @@ fun UpdateDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ThemeSegmented(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .clip(SunShapes.Medium)
+            .background(SunColors.Surface2)
+            .padding(3.dp)
+    ) {
+        ThemeMode.values().forEach { mode ->
+            val active = mode == current
+            val bg by animateColorAsState(
+                targetValue = if (active) SunColors.Surface4 else Color.Transparent,
+                animationSpec = tween(200),
+                label = "themeSeg"
+            )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .clip(SunShapes.Small)
+                    .background(bg)
+                    .clickable { onPick(mode) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    mode.label,
+                    color = if (active) SunColors.TextPrimary else SunColors.TextTertiary,
+                    fontSize = 12.sp,
+                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal
+                )
+            }
+        }
+    }
 }

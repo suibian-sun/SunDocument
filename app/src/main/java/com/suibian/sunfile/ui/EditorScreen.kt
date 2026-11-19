@@ -11,6 +11,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +77,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
@@ -83,6 +92,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -92,6 +103,8 @@ import com.suibian.sunfile.data.AppPrefs
 import com.suibian.sunfile.data.Revision
 import com.suibian.sunfile.ui.components.CircularReveal
 import com.suibian.sunfile.ui.components.DrawCheck
+import com.suibian.sunfile.ui.editor.CodeColors
+import com.suibian.sunfile.ui.editor.CompletionItem
 import com.suibian.sunfile.ui.editor.Syntax
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.NumberStyle
@@ -106,15 +119,17 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
 fun EditorOverlay(
     file: File,
     origin: Offset,
+    initialLine: Int = 0,
     vm: EditorViewModel,
     prefs: AppPrefs,
-    onEditorPrefs: (Int?, Boolean?, Boolean?) -> Unit,
+    onEditorPrefs: (Int?, Boolean?, Boolean?, Boolean?) -> Unit,
     onOpenHex: (File) -> Unit,
     onClose: () -> Unit
 ) {
@@ -126,8 +141,11 @@ fun EditorOverlay(
         vm.toast.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
     }
     var visible by remember { mutableStateOf(false) }
+    val palette = SunColors
+    val codeColors = remember(palette) { CodeColors.of(palette) }
     var value by remember(file) { mutableStateOf(TextFieldValue("")) }
     var fontSize by remember(file) { mutableIntStateOf(prefs.editorFontSize) }
+    val liveFontSize by androidx.compose.runtime.rememberUpdatedState(fontSize)
     var wrap by remember(file) { mutableStateOf(prefs.editorWrap) }
     var lineNumbers by remember(file) { mutableStateOf(prefs.editorLineNumbers) }
     var showFind by remember { mutableStateOf(false) }
@@ -140,8 +158,8 @@ fun EditorOverlay(
     var showHistory by remember { mutableStateOf(false) }
     var exitConfirm by remember { mutableStateOf(false) }
     var burstKey by remember { mutableIntStateOf(0) }
-    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
-    var prefixStart by remember { mutableIntStateOf(0) }
+    var completion by remember { mutableStateOf<com.suibian.sunfile.ui.editor.CompletionResult?>(null) }
+    var completionIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(file) {
         visible = true
@@ -150,7 +168,17 @@ fun EditorOverlay(
 
     LaunchedEffect(state.syncToken) {
         if (!state.loading && state.file != null && state.syncToken > 0) {
-            value = TextFieldValue(state.text, TextRange(0))
+            if (initialLine > 1) {
+                var index = 0
+                var line = 1
+                while (line < initialLine && index < state.text.length) {
+                    if (state.text[index] == '\n') line++
+                    index++
+                }
+                value = TextFieldValue(state.text, TextRange(index.coerceAtMost(state.text.length)))
+            } else {
+                value = TextFieldValue(state.text, TextRange(0))
+            }
         }
     }
 
@@ -165,7 +193,7 @@ fun EditorOverlay(
     }
 
     LaunchedEffect(value.selection) {
-        if (!value.selection.collapsed) suggestions = emptyList()
+        if (!value.selection.collapsed) completion = null
     }
 
     fun jumpTo(index: Int) {
@@ -177,27 +205,50 @@ fun EditorOverlay(
     }
 
     fun refreshSuggestions(tv: TextFieldValue) {
-        if (!tv.selection.collapsed || tv.selection.start <= 0) {
-            suggestions = emptyList()
+        if (!prefs.editorCompletion || !tv.selection.collapsed) {
+            completion = null
             return
         }
-        val caret = tv.selection.start
-        var s = caret
-        while (s > 0 && (tv.text[s - 1].isLetterOrDigit() || tv.text[s - 1] == '_')) s--
-        val prefix = tv.text.substring(s, caret)
-        prefixStart = s
-        suggestions = if (prefix.length >= 2) Syntax.completions(state.lang, prefix, tv.text) else emptyList()
+        completion = com.suibian.sunfile.ui.editor.CompletionEngine
+            .suggest(state.lang, tv.text, tv.selection.start, 8)
+        completionIndex = 0
     }
 
-    fun applyCompletion(item: String) {
-        val caret = value.selection.start.coerceIn(0, value.text.length)
-        val prefix = value.text.substring(prefixStart.coerceIn(0, caret), caret)
-        val insert = Syntax.applySnippet(item, prefix)
-        val newText = value.text.substring(0, prefixStart) + insert + value.text.substring(caret)
-        val newValue = TextFieldValue(newText, TextRange(prefixStart + insert.length))
-        value = newValue
+    fun applyCompletion(item: com.suibian.sunfile.ui.editor.CompletionItem) {
+        val c = completion ?: return
+        val start = c.replaceStart.coerceIn(0, value.text.length)
+        val end = c.replaceEnd.coerceIn(start, value.text.length)
+        val newText = value.text.substring(0, start) + item.insert + value.text.substring(end)
+        val caret = (start + item.insert.length - item.caretBack).coerceIn(0, newText.length)
+        value = TextFieldValue(newText, TextRange(caret))
         vm.updateText(newText)
-        suggestions = emptyList()
+        completion = null
+    }
+
+    // 外接键盘：↑↓ 选择、Tab 接受、Esc 关闭（与 VS Code 一致的键位）
+    fun onKeyEvent(e: KeyEvent): Boolean {
+        val c = completion ?: return false
+        return when (e.key) {
+            Key.Tab, Key.Enter -> {
+                if (c.items.isNotEmpty()) {
+                    applyCompletion(c.items[completionIndex.coerceIn(0, c.items.lastIndex)])
+                    true
+                } else false
+            }
+            Key.DirectionDown -> {
+                completionIndex = (completionIndex + 1) % c.items.size
+                true
+            }
+            Key.DirectionUp -> {
+                completionIndex = (completionIndex - 1 + c.items.size) % c.items.size
+                true
+            }
+            Key.Escape -> {
+                completion = null
+                true
+            }
+            else -> false
+        }
     }
 
     fun close() {
@@ -311,7 +362,7 @@ fun EditorOverlay(
                         ) {
                             menuOpen = false
                             wrap = !wrap
-                            onEditorPrefs(null, wrap, null)
+                            onEditorPrefs(null, wrap, null, null)
                         }
                         EditorMenu(
                             if (lineNumbers) "隐藏行号" else "显示行号",
@@ -319,17 +370,17 @@ fun EditorOverlay(
                         ) {
                             menuOpen = false
                             lineNumbers = !lineNumbers
-                            onEditorPrefs(null, null, lineNumbers)
+                            onEditorPrefs(null, null, lineNumbers, null)
                         }
                         EditorMenu("字号 +", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
                             fontSize = (fontSize + 1).coerceAtMost(22)
-                            onEditorPrefs(fontSize, null, null)
+                            onEditorPrefs(fontSize, null, null, null)
                         }
                         EditorMenu("字号 −", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
                             fontSize = (fontSize - 1).coerceAtLeast(10)
-                            onEditorPrefs(fontSize, null, null)
+                            onEditorPrefs(fontSize, null, null, null)
                         }
                         EditorMenu("历史版本", Icons.Default.History) {
                             menuOpen = false
@@ -392,46 +443,66 @@ fun EditorOverlay(
                 }
             }
 
-            // ---------------- 大文件提示 ----------------
-            if (state.readOnly) {
+            // ---------------- 分页导航（超大文件） ----------------
+            if (state.paged) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF2A2313))
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .background(SunColors.Surface2)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Outlined.Info, null, tint = SunColors.Warning, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(8.dp))
                     Text(
-                        "大文件 ${Fmt.size(state.totalBytes)}，已载入前 ${Fmt.size(state.text.toByteArray().size.toLong())}（只读）",
-                        color = SunColors.Warning,
-                        fontSize = 9.5.sp,
+                        "${Fmt.size(state.pageOffset)} – ${Fmt.size(state.pageOffset + state.pageBytes)}",
+                        color = SunColors.TextTertiary,
+                        fontSize = 9.sp,
+                        style = NumberStyle,
                         modifier = Modifier.weight(1f)
                     )
+                    PageStep(Icons.Default.KeyboardArrowUp, enabled = state.hasPrevPage) {
+                        vm.prevPage { value = TextFieldValue(vm.state.value.text, TextRange(0)) }
+                    }
                     Text(
-                        "十六进制",
+                        "${state.pageIndex + 1} / ${state.pageCount}",
                         color = SunColors.TextSecondary,
-                        fontSize = 10.5.sp,
-                        modifier = Modifier
-                            .clip(SunShapes.Small)
-                            .clickable { onOpenHex(state.file ?: file) }
-                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                        fontSize = 9.5.sp,
+                        style = NumberStyle,
+                        modifier = Modifier.padding(horizontal = 6.dp)
                     )
-                    Text(
-                        "另存为",
-                        color = SunColors.Accent,
-                        fontSize = 10.5.sp,
-                        modifier = Modifier
-                            .clip(SunShapes.Small)
-                            .clickable { saveAsOpen = true }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    PageStep(Icons.Default.KeyboardArrowDown, enabled = state.hasNextPage) {
+                        vm.nextPage { value = TextFieldValue(vm.state.value.text, TextRange(0)) }
+                    }
                 }
             }
 
             // ---------------- 编辑区 ----------------
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(SunColors.Bg)) {
+            BoxWithConstraints(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(SunColors.Bg)
+                    // 双指捏合缩放字号（单指仍交给文本选择，互不抢手势）
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.size >= 2) {
+                                    val zoom = event.calculateZoom()
+                                    if (zoom != 1f && zoom > 0f) {
+                                        val next = (liveFontSize * zoom).roundToInt().coerceIn(8, 40)
+                                        if (next != fontSize) {
+                                            fontSize = next
+                                            onEditorPrefs(next, null, null, null)
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                                if (event.changes.none { it.pressed }) break
+                            }
+                        }
+                    }
+            ) {
                 val density = LocalDensity.current
                 val lineHpx = with(density) { lineHeight.toPx() }
                 val viewportPx = with(density) { maxHeight.toPx() }
@@ -465,12 +536,13 @@ fun EditorOverlay(
                         },
                         textStyle = textStyle,
                         cursorBrush = SolidColor(SunColors.Accent),
-                        visualTransformation = remember(state.lang) { Syntax.CodeHighlightTransformation(state.lang) },
+                        visualTransformation = remember(state.lang, codeColors) { Syntax.CodeHighlightTransformation(state.lang, codeColors) },
                         readOnly = state.readOnly,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Default),
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(vScroll)
+                            .onPreviewKeyEvent { onKeyEvent(it) }
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     )
 
@@ -507,7 +579,7 @@ fun EditorOverlay(
                                 },
                                 textStyle = textStyle,
                                 cursorBrush = SolidColor(SunColors.Accent),
-                                visualTransformation = remember(state.lang) { Syntax.CodeHighlightTransformation(state.lang) },
+                                visualTransformation = remember(state.lang, codeColors) { Syntax.CodeHighlightTransformation(state.lang, codeColors) },
                                 readOnly = state.readOnly,
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Text,
@@ -517,9 +589,17 @@ fun EditorOverlay(
                                 modifier = Modifier
                                     .widthIn(max = 8000.dp)
                                     .heightIn(min = (viewportDp - 16.dp).coerceAtLeast(40.dp))
+                                    .onPreviewKeyEvent { onKeyEvent(it) }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             )
                         }
+                    }
+                }
+
+                LaunchedEffect(state.pageIndex) {
+                    if (state.paged) {
+                        vScroll.scrollTo(0)
+                        hScroll.scrollTo(0)
                     }
                 }
 
@@ -535,31 +615,30 @@ fun EditorOverlay(
                 }
             }
 
-            // ---------------- 补全候选 ----------------
-            AnimatedVisibility(visible = suggestions.isNotEmpty()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(38.dp)
-                        .background(SunColors.Surface2)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    suggestions.forEach { item ->
-                        Text(
-                            item,
-                            color = SunColors.TextPrimary,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .padding(end = 6.dp)
-                                .clip(SunShapes.Small)
-                                .background(SunColors.Surface4)
-                                .clickable { applyCompletion(item) }
-                                .padding(horizontal = 9.dp, vertical = 5.dp)
-                        )
+            // ---------------- 补全候选（VS Code 风格浮层） ----------------
+            val comp = completion
+            AnimatedVisibility(
+                visible = comp != null,
+                enter = fadeIn(tween(Motion.Fast)) +
+                    androidx.compose.animation.scaleIn(tween(Motion.Base, easing = Motion.EaseOut), initialScale = 0.96f),
+                exit = fadeOut(tween(Motion.Fast))
+            ) {
+                if (comp != null) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                            .clip(SunShapes.Medium)
+                            .background(SunColors.Surface4)
+                            .padding(vertical = 4.dp)
+                    ) {
+                        comp.items.forEachIndexed { i, item ->
+                            CompletionRow(
+                                item = item,
+                                active = i == completionIndex,
+                                onClick = { applyCompletion(item) }
+                            )
+                        }
                     }
                 }
             }
@@ -928,4 +1007,91 @@ private fun ReplaceDialog(
             TextButton(onClick = onDismiss) { Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp) }
         }
     )
+}
+
+/** 补全候选行：类型徽标 + 命中字符高亮 + 右侧类型说明 */
+@Composable
+private fun CompletionRow(item: CompletionItem, active: Boolean, onClick: () -> Unit) {
+    val bg by androidx.compose.animation.animateColorAsState(
+        targetValue = if (active) SunColors.AccentSoft else Color.Transparent,
+        animationSpec = tween(Motion.Fast),
+        label = "compBg"
+    )
+    val badge = when (item.kind) {
+        com.suibian.sunfile.ui.editor.CompletionKind.KEYWORD -> SunColors.Accent
+        com.suibian.sunfile.ui.editor.CompletionKind.SNIPPET -> SunColors.Success
+        com.suibian.sunfile.ui.editor.CompletionKind.SYMBOL -> SunColors.Folder
+        com.suibian.sunfile.ui.editor.CompletionKind.MEMBER -> SunColors.Accent
+        com.suibian.sunfile.ui.editor.CompletionKind.TYPE -> SunColors.Warning
+        com.suibian.sunfile.ui.editor.CompletionKind.WORD -> SunColors.TextTertiary
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(15.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                .background(badge.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                item.kind.tag,
+                color = badge,
+                fontSize = 7.5.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = buildAnnotatedString {
+                append(item.label)
+                item.hits.forEach { h ->
+                    if (h in item.label.indices) {
+                        addStyle(
+                            SpanStyle(color = SunColors.Accent, fontWeight = FontWeight.SemiBold),
+                            h,
+                            h + 1
+                        )
+                    }
+                }
+            },
+            color = SunColors.TextPrimary,
+            fontSize = 11.5.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            item.detail,
+            color = SunColors.TextTertiary,
+            fontSize = 8.5.sp,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun PageStep(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(26.dp)) {
+        Icon(
+            icon,
+            null,
+            tint = if (enabled) SunColors.TextSecondary else SunColors.TextTertiary.copy(alpha = 0.3f),
+            modifier = Modifier.size(16.dp)
+        )
+    }
 }

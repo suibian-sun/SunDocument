@@ -212,6 +212,7 @@ fun ShimmerList(rows: Int = 9) {
 
 @Composable
 private fun ShimmerBar(widthFactor: Float, height: Dp, shift: Float, delay: Float = 0f) {
+    val shimmerColor = SunColors.Surface4
     Box(
         Modifier
             .fillMaxWidth(widthFactor)
@@ -225,7 +226,7 @@ private fun ShimmerBar(widthFactor: Float, height: Dp, shift: Float, delay: Floa
                     brush = Brush.linearGradient(
                         colors = listOf(
                             Color.Transparent,
-                            SunColors.Surface4.copy(alpha = 0.85f),
+                            shimmerColor.copy(alpha = 0.85f),
                             Color.Transparent
                         ),
                         start = Offset(w * (shift - 0.4f + delay), 0f),

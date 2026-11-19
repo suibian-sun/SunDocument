@@ -8,6 +8,7 @@ import com.suibian.sunfile.data.ClipItem
 import com.suibian.sunfile.data.FileEntry
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.PrefsStore
+import com.suibian.sunfile.data.Shell
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.data.StorageStats
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +57,11 @@ data class OpState(
 
 data class SearchResult(val entry: FileEntry, val relative: String)
 
+enum class SearchMode(val label: String) {
+    NAME("名称"),
+    CONTENT("内容")
+}
+
 data class SearchUiState(
     val root: String = "",
     val query: String = "",
@@ -63,12 +69,14 @@ data class SearchUiState(
     val scanned: Int = 0,
     val current: String = "",
     val results: List<SearchResult> = emptyList(),
+    val contentHits: List<FileRepo.ContentHit> = emptyList(),
+    val mode: SearchMode = SearchMode.NAME,
     val finished: Boolean = false
 )
 
 class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
 
-    val prefsStore = PrefsStore(app)
+    val prefsStore = PrefsStore.get(app)
 
     private val _panes = MutableStateFlow(listOf(PaneState(), PaneState()))
     val panes: StateFlow<List<PaneState>> = _panes
@@ -154,7 +162,10 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { FileRepo.listDetailed(dir, cfg.showHidden, cfg.sort) }
             }
             result.onSuccess { listing ->
-                if (record) prefsStore.saveLastPath(index, dir.absolutePath)
+                if (record) {
+                    prefsStore.saveLastPath(index, dir.absolutePath)
+                    prefsStore.pushRecent(dir.absolutePath)
+                }
                 if (dir.absolutePath == _panes.value[_active.value].path || index == _active.value) {
                     _storage.value = withContext(Dispatchers.IO) { StorageStats.of(dir.absolutePath) }
                 }
@@ -489,13 +500,40 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleAutoCheck() = prefsStore.update { it.copy(autoCheckUpdate = !it.autoCheckUpdate) }
 
-    fun setEditorPrefs(fontSize: Int? = null, wrap: Boolean? = null, lineNumbers: Boolean? = null) {
+    fun setEditorPrefs(
+        fontSize: Int? = null,
+        wrap: Boolean? = null,
+        lineNumbers: Boolean? = null,
+        completion: Boolean? = null
+    ) {
         prefsStore.update {
             it.copy(
                 editorFontSize = fontSize ?: it.editorFontSize,
                 editorWrap = wrap ?: it.editorWrap,
-                editorLineNumbers = lineNumbers ?: it.editorLineNumbers
+                editorLineNumbers = lineNumbers ?: it.editorLineNumbers,
+                editorCompletion = completion ?: it.editorCompletion
             )
+        }
+    }
+
+    /** 修改权限位（需要 root 才能作用于系统目录） */
+    fun chmod(target: String, mode: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                Shell.chmod(target, mode) || runCatching {
+                    val f = File(target)
+                    var applied = true
+                    val perms = mode.padStart(3, '0').takeLast(3)
+                    val owner = perms[0].digitToInt()
+                    applied = applied && f.setReadable(owner and 4 != 0, true)
+                    applied = applied && f.setWritable(owner and 2 != 0, true)
+                    applied = applied && f.setExecutable(owner and 1 != 0, true)
+                    applied
+                }.getOrDefault(false)
+            }
+            _messages.tryEmit(if (ok) "权限已修改为 $mode" else "修改权限失败")
+            if (ok) refreshAll()
+            onDone(ok)
         }
     }
 
@@ -515,6 +553,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _search.value = _search.value.copy(
             root = activePaneState.path,
             results = emptyList(),
+            contentHits = emptyList(),
             scanned = 0,
             finished = false
         )
@@ -524,28 +563,55 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _search.value = _search.value.copy(query = q)
     }
 
+    fun setSearchMode(mode: SearchMode) {
+        if (_search.value.mode == mode) return
+        _search.value = _search.value.copy(
+            mode = mode,
+            results = emptyList(),
+            contentHits = emptyList(),
+            finished = false,
+            scanned = 0
+        )
+    }
+
     fun startSearch() {
         val s = _search.value
         if (s.query.isBlank() || s.running) return
         searchJob?.cancel()
-        _search.value = s.copy(running = true, results = emptyList(), scanned = 0, finished = false)
+        _search.value = s.copy(
+            running = true, results = emptyList(), contentHits = emptyList(), scanned = 0, finished = false
+        )
         searchJob = viewModelScope.launch {
             val rootDir = File(s.root)
-            val list = withContext(Dispatchers.IO) {
-                FileRepo.search(
-                    root = rootDir,
-                    query = s.query,
-                    onProgress = { scanned, current ->
-                        _search.value = _search.value.copy(scanned = scanned, current = current)
-                    },
-                    cancelled = { !isActive }
+            if (s.mode == SearchMode.CONTENT) {
+                val hits = withContext(Dispatchers.IO) {
+                    FileRepo.searchContent(
+                        root = rootDir,
+                        query = s.query,
+                        onProgress = { scanned, current ->
+                            _search.value = _search.value.copy(scanned = scanned, current = current)
+                        },
+                        cancelled = { !isActive }
+                    )
+                }
+                _search.value = _search.value.copy(running = false, finished = true, contentHits = hits)
+            } else {
+                val list = withContext(Dispatchers.IO) {
+                    FileRepo.search(
+                        root = rootDir,
+                        query = s.query,
+                        onProgress = { scanned, current ->
+                            _search.value = _search.value.copy(scanned = scanned, current = current)
+                        },
+                        cancelled = { !isActive }
+                    )
+                }
+                _search.value = _search.value.copy(
+                    running = false,
+                    finished = true,
+                    results = list.map { SearchResult(it, FileRepo.relativeTo(s.root, it.path)) }
                 )
             }
-            _search.value = _search.value.copy(
-                running = false,
-                finished = true,
-                results = list.map { SearchResult(it, FileRepo.relativeTo(s.root, it.path)) }
-            )
         }
     }
 

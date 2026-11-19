@@ -1,10 +1,12 @@
 package com.suibian.sunfile.data
 
 import android.content.Context
+import com.suibian.sunfile.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 data class AppPrefs(
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val showHidden: Boolean = false,
     val sort: SortSpec = SortSpec(),
     val useAccelerator: Boolean = true,
@@ -14,16 +16,35 @@ data class AppPrefs(
     val editorFontSize: Int = 13,
     val editorWrap: Boolean = false,
     val editorLineNumbers: Boolean = true,
-    val bookmarks: List<String> = emptyList()
+    val editorCompletion: Boolean = true,
+    val bookmarks: List<String> = emptyList(),
+    /** 最近访问过的目录，最新在前 */
+    val recent: List<String> = emptyList()
 )
 
-class PrefsStore(context: Context) {
+/**
+ * 全局唯一的偏好存储：主题、编辑器、排序等由此驱动，
+ * 保证设置页修改后主界面立即生效（多实例会各自持有独立 StateFlow）。
+ */
+class PrefsStore private constructor(context: Context) {
     private val sp = context.applicationContext.getSharedPreferences("sunfile", Context.MODE_PRIVATE)
 
     private val _prefs = MutableStateFlow(load())
     val prefs: StateFlow<AppPrefs> = _prefs
 
+    companion object {
+        @Volatile
+        private var instance: PrefsStore? = null
+
+        fun get(context: Context): PrefsStore =
+            instance ?: synchronized(this) {
+                instance ?: PrefsStore(context.applicationContext).also { instance = it }
+            }
+    }
+
     private fun load(): AppPrefs = AppPrefs(
+        themeMode = runCatching { ThemeMode.valueOf(sp.getString("theme_mode", "SYSTEM")!!) }
+            .getOrDefault(ThemeMode.SYSTEM),
         showHidden = sp.getBoolean("show_hidden", false),
         sort = SortSpec(
             mode = runCatching { SortMode.valueOf(sp.getString("sort_mode", "NAME")!!) }
@@ -33,10 +54,12 @@ class PrefsStore(context: Context) {
         useAccelerator = sp.getBoolean("use_accelerator", true),
         autoCheckUpdate = sp.getBoolean("auto_check_update", true),
         openWith = decodeOpenWith(sp.getString("open_with", "") ?: ""),
-        editorFontSize = sp.getInt("editor_font_size", 13).coerceIn(10, 22),
+        editorFontSize = sp.getInt("editor_font_size", 13).coerceIn(8, 40),
         editorWrap = sp.getBoolean("editor_wrap", false),
         editorLineNumbers = sp.getBoolean("editor_line_numbers", true),
-        bookmarks = (sp.getString("bookmarks", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct()
+        editorCompletion = sp.getBoolean("editor_completion", true),
+        bookmarks = (sp.getString("bookmarks", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct(),
+        recent = (sp.getString("recent", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct().take(20)
     )
 
     private fun decodeOpenWith(raw: String): Map<String, OpenMode> {
@@ -92,10 +115,32 @@ class PrefsStore(context: Context) {
         sp.edit().putString("bookmarks", list.joinToString("\n")).apply()
     }
 
+    /** 记录访问过的目录（去重后置顶，最多 20 条） */
+    fun pushRecent(path: String) {
+        if (path.isBlank()) return
+        val list = (_prefs.value.recent.filterNot { it == path }).toMutableList()
+        list.add(0, path)
+        val trimmed = list.take(20)
+        if (trimmed == _prefs.value.recent) return
+        _prefs.value = _prefs.value.copy(recent = trimmed)
+        sp.edit().putString("recent", trimmed.joinToString("\n")).apply()
+    }
+
+    fun clearRecent() {
+        _prefs.value = _prefs.value.copy(recent = emptyList())
+        sp.edit().putString("recent", "").apply()
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        _prefs.value = _prefs.value.copy(themeMode = mode)
+        sp.edit().putString("theme_mode", mode.name).apply()
+    }
+
     fun update(block: (AppPrefs) -> AppPrefs) {
         val next = block(_prefs.value)
         _prefs.value = next
         sp.edit()
+            .putString("theme_mode", next.themeMode.name)
             .putBoolean("show_hidden", next.showHidden)
             .putString("sort_mode", next.sort.mode.name)
             .putBoolean("sort_asc", next.sort.ascending)
@@ -104,8 +149,10 @@ class PrefsStore(context: Context) {
             .putInt("editor_font_size", next.editorFontSize)
             .putBoolean("editor_wrap", next.editorWrap)
             .putBoolean("editor_line_numbers", next.editorLineNumbers)
+            .putBoolean("editor_completion", next.editorCompletion)
             .putString("open_with", encodeOpenWith(next.openWith))
             .putString("bookmarks", next.bookmarks.joinToString("\n"))
+            .putString("recent", next.recent.joinToString("\n"))
             .apply()
     }
 }

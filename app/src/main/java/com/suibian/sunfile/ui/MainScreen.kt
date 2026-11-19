@@ -66,6 +66,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
@@ -79,6 +80,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -99,10 +101,12 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,6 +114,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -191,6 +198,7 @@ fun MainScreen(
     var sheet by remember { mutableStateOf<SheetKind?>(null) }
     var dialog by remember { mutableStateOf<DialogKind?>(null) }
     var editorTarget by remember { mutableStateOf<File?>(null) }
+    var editorLine by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var editorOrigin by remember { mutableStateOf(Offset.Zero) }
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     var openWithTarget by remember { mutableStateOf<File?>(null) }
@@ -213,10 +221,29 @@ fun MainScreen(
         vm.messages.collect { snackbarHost.showSnackbar(it) }
     }
 
+    var exitArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(exitArmed) {
+        if (exitArmed) {
+            delay(2000)
+            exitArmed = false
+        }
+    }
+
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(enabled = drawerState.isClosed && page != Page.Files) { page = Page.Files }
     BackHandler(enabled = drawerState.isClosed && page == Page.Files && pane.selectionMode) {
         vm.clearSelection()
+    }
+    // 聚焦栏内按返回：先回上一级，只有在根目录才退出
+    BackHandler(enabled = drawerState.isClosed && page == Page.Files && !pane.selectionMode) {
+        if (pane.canUp) {
+            vm.goUp()
+        } else if (exitArmed) {
+            (context as? android.app.Activity)?.finish()
+        } else {
+            exitArmed = true
+            Toast.makeText(context, "再按一次退出", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun openWith(file: File, mode: OpenMode, origin: Offset = Offset.Zero) {
@@ -256,6 +283,7 @@ fun MainScreen(
             DrawerContent(
                 currentPath = pane.path,
                 version = BuildConfig.VERSION_NAME,
+                recent = prefs.recent,
                 storageUsed = storage?.used ?: 0L,
                 storageTotal = storage?.total ?: 0L,
                 bookmarks = prefs.bookmarks,
@@ -356,7 +384,15 @@ fun MainScreen(
                         onChecksum = {
                             pane.selected.singleOrNull()?.let { dialog = DialogKind.Checksum(File(it)) }
                         },
-                        onBookmarks = { sheet = SheetKind.Bookmarks }
+                        onBookmarks = { sheet = SheetKind.Bookmarks },
+                        onApkInfo = {
+                            pane.selected.singleOrNull()?.let { sheet = SheetKind.Apk(File(it)) }
+                        },
+                        onChmod = {
+                            pane.selected.singleOrNull()?.let {
+                                dialog = DialogKind.Chmod(File(it), File(it).let { f -> runCatching { com.suibian.sunfile.data.Shell.modeOf(f.absolutePath) }.getOrNull() })
+                            }
+                        }
                     )
 
                     Page.Search -> SearchPage(
@@ -368,6 +404,13 @@ fun MainScreen(
                         onResult = { entry ->
                             page = Page.Files
                             vm.revealPath(entry)
+                        },
+                        onModeChange = { vm.setSearchMode(it) },
+                        onContentResult = { hit ->
+                            page = Page.Files
+                            editorLine = hit.line
+                            editorOrigin = Offset.Zero
+                            editorTarget = hit.file
                         }
                     )
 
@@ -380,8 +423,23 @@ fun MainScreen(
                         onToggleAutoCheck = { vm.toggleAutoCheck() },
                         onToggleAccelerator = { vm.toggleAccelerator() },
                         onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
-                        onEditorPrefs = { size, wrap, lines -> vm.setEditorPrefs(size, wrap, lines) },
+                        onEditorPrefs = { size, wrap, lines, comp -> vm.setEditorPrefs(size, wrap, lines, comp) },
+                        onThemeChange = { vm.prefsStore.setThemeMode(it) },
                         onClearOpenWith = { vm.prefsStore.clearOpenWith() },
+                        onClearRecent = { vm.prefsStore.clearRecent() },
+                        onRequestRoot = {
+                            scope.launch {
+                                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.suibian.sunfile.data.Shell.requestRoot()
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "已获得 Root，可访问全部目录" else "未获得 Root，系统目录仍受限",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                vm.refreshAll()
+                            }
+                        },
                         onAbout = { dialog = DialogKind.About }
                     )
                 }
@@ -462,6 +520,8 @@ fun MainScreen(
             onGo = { path -> sheet = null; vm.navigate(path) },
             onRemove = { path -> vm.prefsStore.removeBookmark(path) }
         )
+
+        is SheetKind.Apk -> ApkSheet(file = s.file, onDismiss = { sheet = null })
 
         is SheetKind.OpenWith -> OpenWithSheet(
             file = s.file,
@@ -580,6 +640,16 @@ fun MainScreen(
             onDismiss = { dialog = null }
         )
 
+        is DialogKind.Chmod -> ChmodDialog(
+            file = d.file,
+            current = d.current,
+            onConfirm = { mode ->
+                dialog = null
+                vm.chmod(d.file.absolutePath, mode)
+            },
+            onDismiss = { dialog = null }
+        )
+
         is DialogKind.Checksum -> ChecksumDialog(
             file = d.file,
             loader = { f, algo -> vm.checksumOf(f, algo) },
@@ -640,9 +710,10 @@ fun MainScreen(
         EditorOverlay(
             file = file,
             origin = editorOrigin,
+            initialLine = editorLine,
             vm = editorVm,
             prefs = prefs,
-            onEditorPrefs = { size, wrap, lines -> vm.setEditorPrefs(size, wrap, lines) },
+            onEditorPrefs = { size, wrap, lines, comp -> vm.setEditorPrefs(size, wrap, lines, comp) },
             onOpenHex = { f ->
                 editorVm.reset()
                 editorTarget = null
@@ -650,6 +721,7 @@ fun MainScreen(
             },
             onClose = {
                 editorTarget = null
+                editorLine = 0
                 vm.refreshAll()
             }
         )
@@ -719,9 +791,12 @@ private fun FilesPage(
     onCompressSelection: () -> Unit,
     onBatchRename: () -> Unit,
     onChecksum: () -> Unit,
-    onBookmarks: () -> Unit
+    onBookmarks: () -> Unit,
+    onApkInfo: () -> Unit,
+    onChmod: () -> Unit
 ) {
     val pane = panes[active]
+    val scrollMemory = remember { mutableStateMapOf<String, Int>() }
     Column(
         Modifier
             .fillMaxSize()
@@ -736,6 +811,7 @@ private fun FilesPage(
             showHidden = showHidden,
             drawerOpen = drawerOpen,
             clipboardCount = clipboardCount,
+            bookmarks = bookmarks,
             onOverflowChange = onOverflowChange,
             onOpenDrawer = onOpenDrawer,
             onPathClick = onPathClick,
@@ -753,7 +829,10 @@ private fun FilesPage(
             onCompress = onCompressSelection,
             onBatchRename = onBatchRename,
             onChecksum = onChecksum,
-            onBookmarks = onBookmarks
+            onBookmarks = onBookmarks,
+            onApkInfo = onApkInfo,
+            onChmod = onChmod,
+            onToggleBookmark = onToggleBookmark
         )
 
         if (!hasAccess) GrantBanner(onRequestAccess)
@@ -763,32 +842,28 @@ private fun FilesPage(
                 index = 0,
                 pane = panes[0],
                 active = active == 0,
-                bookmarked = bookmarks.contains(panes[0].path),
+                scrollMemory = scrollMemory,
                 modifier = Modifier.weight(1f),
                 onActivate = { onActivate(0) },
                 onOpen = { entry, origin -> onOpenEntry(0, entry, origin) },
                 onLongPress = { onLongPress(0, it) },
                 onMore = onEntryMore,
                 onUp = { onUp(0) },
-                onPathClick = { onActivate(0); onPathClick() },
-                onRefresh = { onRefresh(0) },
-                onToggleBookmark = { onToggleBookmark(panes[0].path) }
+                onRefresh = { onRefresh(0) }
             )
             PaneDivider(active = active == 0)
             PaneView(
                 index = 1,
                 pane = panes[1],
                 active = active == 1,
-                bookmarked = bookmarks.contains(panes[1].path),
+                scrollMemory = scrollMemory,
                 modifier = Modifier.weight(1f),
                 onActivate = { onActivate(1) },
                 onOpen = { entry, origin -> onOpenEntry(1, entry, origin) },
                 onLongPress = { onLongPress(1, it) },
                 onMore = onEntryMore,
                 onUp = { onUp(1) },
-                onPathClick = { onActivate(1); onPathClick() },
-                onRefresh = { onRefresh(1) },
-                onToggleBookmark = { onToggleBookmark(panes[1].path) }
+                onRefresh = { onRefresh(1) }
             )
         }
 
@@ -823,6 +898,7 @@ private fun TopBar(
     showHidden: Boolean,
     drawerOpen: Boolean,
     clipboardCount: Int,
+    bookmarks: List<String>,
     onOverflowChange: (Boolean) -> Unit,
     onOpenDrawer: () -> Unit,
     onPathClick: () -> Unit,
@@ -840,7 +916,10 @@ private fun TopBar(
     onCompress: () -> Unit,
     onBatchRename: () -> Unit,
     onChecksum: () -> Unit,
-    onBookmarks: () -> Unit
+    onBookmarks: () -> Unit,
+    onApkInfo: () -> Unit,
+    onChmod: () -> Unit,
+    onToggleBookmark: (String) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     Row(
@@ -883,14 +962,26 @@ private fun TopBar(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Folder,
+                    null,
+                    tint = SunColors.Folder.copy(alpha = 0.75f),
+                    modifier = Modifier.size(10.dp)
+                )
+                Spacer(Modifier.width(3.dp))
                 RollingNumber(pane.dirCount, NumberStyle, SunColors.TextTertiary)
-                Text(" 文件夹", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
-                Text(" · ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Spacer(Modifier.width(9.dp))
+                Icon(
+                    Icons.Outlined.Description,
+                    null,
+                    tint = SunColors.File.copy(alpha = 0.75f),
+                    modifier = Modifier.size(10.dp)
+                )
+                Spacer(Modifier.width(3.dp))
                 RollingNumber(pane.fileCount, NumberStyle, SunColors.TextTertiary)
-                Text(" 文件", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
-                Text(" · ", style = MaterialTheme.typography.labelSmall, color = SunColors.TextTertiary)
+                Spacer(Modifier.width(10.dp))
                 Text(
                     Fmt.sizePair(storageUsed, storageTotal),
                     style = NumberStyle,
@@ -915,13 +1006,13 @@ private fun TopBar(
                 modifier = Modifier.background(SunColors.Surface4, SunShapes.Medium),
                 offset = androidx.compose.ui.unit.DpOffset(0.dp, 6.dp)
             ) {
-                ToolMenuItem(Icons.Outlined.Refresh, "刷新", "重新读取当前窗口") {
+                ToolMenuItem(Icons.Outlined.Refresh, "刷新", null) {
                     onOverflowChange(false); onRefresh()
                 }
-                ToolMenuItem(Icons.Outlined.Search, "搜索", "在当前目录递归查找") {
+                ToolMenuItem(Icons.Outlined.Search, "搜索", null) {
                     onOverflowChange(false); onSearch()
                 }
-                ToolMenuItem(Icons.Outlined.Sort, "排序", "${pane.entries.size} 项") {
+                ToolMenuItem(Icons.Outlined.Sort, "排序", "${pane.entries.size}") {
                     onOverflowChange(false); onSort()
                 }
                 ToolMenuItem(Icons.Outlined.SelectAll, "全选", null) {
@@ -937,7 +1028,7 @@ private fun TopBar(
                 ) {
                     onOverflowChange(false); onToggleHidden()
                 }
-                ToolMenuItem(Icons.Outlined.SwapHoriz, "交换窗口", "A ⇄ B") {
+                ToolMenuItem(Icons.Outlined.SwapHoriz, "交换窗口", null) {
                     onOverflowChange(false); onSwap()
                 }
                 if (clipboardCount > 0) {
@@ -945,31 +1036,49 @@ private fun TopBar(
                         onOverflowChange(false); onPaste()
                     }
                 }
+                ToolMenuItem(
+                    if (bookmarks.contains(pane.path)) Icons.Outlined.Star else Icons.Outlined.BookmarkBorder,
+                    if (bookmarks.contains(pane.path)) "取消收藏当前目录" else "收藏当前目录",
+                    null
+                ) {
+                    onOverflowChange(false); onToggleBookmark(pane.path)
+                }
                 ToolMenuItem(Icons.Outlined.BookmarkBorder, "收藏夹", null) {
                     onOverflowChange(false); onBookmarks()
                 }
                 if (pane.selected.size == 1) {
-                    ToolMenuItem(Icons.Outlined.Info, "属性", "查看详情") {
+                    val only = pane.selected.firstOrNull()?.let { File(it) }
+                    if (only != null && only.extension.equals("apk", true)) {
+                        ToolMenuItem(Icons.Outlined.Terminal, "安装包信息", null) {
+                            onOverflowChange(false); onApkInfo()
+                        }
+                    }
+                    ToolMenuItem(Icons.Outlined.Info, "属性", null) {
                         onOverflowChange(false); onProperties()
                     }
-                    ToolMenuItem(Icons.Outlined.Fingerprint, "校验和", "SHA-256 / MD5") {
+                    ToolMenuItem(Icons.Outlined.Fingerprint, "校验和", null) {
                         onOverflowChange(false); onChecksum()
+                    }
+                    if (com.suibian.sunfile.data.Shell.rootAvailable) {
+                        ToolMenuItem(Icons.Outlined.Terminal, "修改权限", "chmod") {
+                            onOverflowChange(false); onChmod()
+                        }
                     }
                 }
                 if (pane.selected.isNotEmpty()) {
-                    ToolMenuItem(Icons.Outlined.Archive, "压缩为 ZIP", "${pane.selected.size} 项") {
+                    ToolMenuItem(Icons.Outlined.Archive, "压缩为 ZIP", "${pane.selected.size}") {
                         onOverflowChange(false); onCompress()
                     }
                 }
                 if (pane.selected.size > 1) {
-                    ToolMenuItem(Icons.Outlined.DriveFileRenameOutline, "批量重命名", "${pane.selected.size} 项") {
+                    ToolMenuItem(Icons.Outlined.DriveFileRenameOutline, "批量重命名", "${pane.selected.size}") {
                         onOverflowChange(false); onBatchRename()
                     }
                 }
                 ToolMenuItem(Icons.Outlined.Settings, "设置", null) {
                     onOverflowChange(false); onSettings()
                 }
-                ToolMenuItem(Icons.Outlined.SystemUpdate, "检查更新", "当前 v${BuildConfig.VERSION_NAME}") {
+                ToolMenuItem(Icons.Outlined.SystemUpdate, "检查更新", "v${BuildConfig.VERSION_NAME}") {
                     onOverflowChange(false); onCheckUpdate()
                 }
             }
@@ -1006,18 +1115,18 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF241D10))
+            .background(SunColors.Warning.copy(alpha = if (SunColors.dark) 0.12f else 0.10f))
             .padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            "未获得全部文件访问权限，部分目录不可读写",
+            "存储权限未开启",
             color = SunColors.Warning,
             fontSize = 10.sp,
             modifier = Modifier.weight(1f)
         )
         Text(
-            "去授权",
+            "开启",
             color = SunColors.Accent,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
@@ -1046,19 +1155,17 @@ private fun PaneView(
     index: Int,
     pane: PaneState,
     active: Boolean,
-    bookmarked: Boolean,
+    scrollMemory: MutableMap<String, Int>,
     modifier: Modifier = Modifier,
     onActivate: () -> Unit,
     onOpen: (FileEntry, Offset) -> Unit,
     onLongPress: (FileEntry) -> Unit,
     onMore: (FileEntry) -> Unit,
     onUp: () -> Unit,
-    onPathClick: () -> Unit,
-    onRefresh: () -> Unit,
-    onToggleBookmark: () -> Unit
+    onRefresh: () -> Unit
 ) {
     val bg by animateColorAsState(
-        targetValue = if (active) SunColors.Surface1.copy(alpha = 0.55f) else SunColors.Bg,
+        targetValue = if (active) SunColors.Surface1.copy(alpha = if (SunColors.dark) 0.55f else 0.75f) else Color.Transparent,
         animationSpec = tween(Motion.Base),
         label = "paneBg"
     )
@@ -1072,12 +1179,22 @@ private fun PaneView(
         modifier
             .fillMaxHeight()
             .background(bg)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onActivate() }
+            // 手指进入或按下即聚焦该栏，不消费事件，子项点击照常
+            .pointerInput(index) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        when (e.type) {
+                            PointerEventType.Enter,
+                            PointerEventType.Move,
+                            PointerEventType.Press -> onActivate()
+                            else -> Unit
+                        }
+                    }
+                }
+            }
     ) {
-        // 激活指示线
+        // 激活指示线：聚焦栏顶部一道细光，代替文字标签
         Box(
             Modifier
                 .fillMaxWidth()
@@ -1085,58 +1202,13 @@ private fun PaneView(
                 .background(SunColors.Accent.copy(alpha = 0.75f * accentAlpha))
         )
 
-        // 栏头：A/B + 路径 + 收藏
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(34.dp)
-                .padding(start = 8.dp, end = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(15.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(if (active) SunColors.AccentSoft else SunColors.Surface3),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    if (index == 0) "A" else "B",
-                    color = if (active) SunColors.Accent else SunColors.TextTertiary,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            Spacer(Modifier.width(5.dp))
-            Text(
-                compactPath(pane.path).ifEmpty { "/" },
-                color = if (active) SunColors.TextSecondary else SunColors.TextTertiary,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(SunShapes.Small)
-                    .clickable { onActivate(); onPathClick() }
-                    .padding(vertical = 4.dp)
-            )
-            IconButton(onClick = onToggleBookmark, modifier = Modifier.size(26.dp)) {
-                Icon(
-                    if (bookmarked) Icons.Outlined.Star else Icons.Outlined.BookmarkBorder,
-                    "收藏",
-                    tint = if (bookmarked) SunColors.Folder else SunColors.TextTertiary,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-        }
-
         // 固定的「..」上级目录行
         UpRow(enabled = pane.canUp, onClick = { onActivate(); if (pane.canUp) onUp() })
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             PaneList(
                 pane = pane,
+                scrollMemory = scrollMemory,
                 onOpen = { entry, origin -> onActivate(); onOpen(entry, origin) },
                 onLongPress = { onActivate(); onLongPress(it) },
                 onMore = { onActivate(); onMore(it) },
@@ -1184,20 +1256,42 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun PaneList(
     pane: PaneState,
+    scrollMemory: MutableMap<String, Int>,
     onOpen: (FileEntry, Offset) -> Unit,
     onLongPress: (FileEntry) -> Unit,
     onMore: (FileEntry) -> Unit,
     onRetry: () -> Unit,
     onUp: () -> Unit
 ) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(pane.token) { if (pane.entries.isNotEmpty()) listState.scrollToItem(0) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // 每个路径独立记住滚动位置：从子目录返回、从编辑器返回都停在原处
+    val listState = remember(pane.path) { androidx.compose.foundation.lazy.LazyListState() }
+    var restored by remember(pane.path) { mutableStateOf(false) }
+    LaunchedEffect(pane.path, pane.entries.size) {
+        if (!restored && pane.entries.isNotEmpty()) {
+            val saved = scrollMemory[pane.path]
+            if (saved != null && saved in pane.entries.indices) {
+                listState.scrollToItem(saved)
+            }
+            restored = true
+        }
+    }
+    LaunchedEffect(listState, pane.path) {
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { idx ->
+            if (pane.entries.isNotEmpty()) scrollMemory[pane.path] = idx
+        }
+    }
 
     AnimatedContent(
         targetState = pane.path,
         transitionSpec = {
-            (fadeIn(tween(Motion.Base)) + slideInVertically(tween(Motion.Slow, easing = Motion.EaseOut)) { it / 26 }) togetherWith
-                fadeOut(tween(Motion.Fast))
+            val dir = if (pane.navDirection >= 0) 1 else -1
+            (fadeIn(tween(Motion.Base)) +
+                slideInHorizontally(tween(Motion.Slow, easing = Motion.EaseOut)) { w -> dir * w / 6 }) togetherWith
+                (fadeOut(tween(Motion.Fast)) +
+                    slideOutHorizontally(tween(Motion.Base, easing = Motion.EaseIn)) { w -> -dir * w / 10 })
         },
         label = "paneList"
     ) { targetPath ->
@@ -1212,26 +1306,51 @@ private fun PaneList(
             ) {
                 Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(38.dp))
                 Spacer(Modifier.height(8.dp))
-                Text("此目录不可访问", color = SunColors.TextSecondary, fontSize = 11.5.sp)
+                Text("无法读取", color = SunColors.TextSecondary, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     pane.notice ?: "",
                     color = SunColors.TextTertiary,
-                    fontSize = 9.sp,
-                    lineHeight = 13.sp,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Spacer(Modifier.height(10.dp))
-                Row {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "返回上级",
-                        color = SunColors.Accent,
+                        color = SunColors.TextSecondary,
                         fontSize = 10.5.sp,
                         modifier = Modifier
                             .clip(SunShapes.Small)
                             .clickable { onUp() }
                             .padding(horizontal = 9.dp, vertical = 6.dp)
                     )
+                    if (!com.suibian.sunfile.data.Shell.rootAvailable) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "获取 Root",
+                            color = SunColors.TextPrimary,
+                            fontSize = 10.5.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .background(SunColors.AccentSoft)
+                                .clickable {
+                                    scope.launch {
+                                        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.suibian.sunfile.data.Shell.requestRoot()
+                                        }
+                                        Toast.makeText(
+                                            context,
+                                            if (ok) "已获得 Root" else "未获得 Root",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        if (ok) onRetry()
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
                 }
             }
 
@@ -1240,7 +1359,7 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("打不开这个目录", color = SunColors.TextSecondary, fontSize = 11.5.sp)
+                Text("打开失败", color = SunColors.TextSecondary, fontSize = 12.sp)
                 Spacer(Modifier.height(5.dp))
                 Text(
                     pane.error ?: "",
@@ -1268,7 +1387,7 @@ private fun PaneList(
             ) {
                 Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(36.dp))
                 Spacer(Modifier.height(8.dp))
-                Text("空文件夹", color = SunColors.TextTertiary, fontSize = 10.5.sp)
+                Text("空", color = SunColors.TextTertiary, fontSize = 11.sp)
             }
 
             else -> LazyColumn(
@@ -1355,7 +1474,7 @@ private fun FileRow(
             Spacer(Modifier.height(1.dp))
             Text(
                 if (entry.isDir) {
-                    "文件夹 · " + Fmt.timeShort(entry.lastModified)
+                    Fmt.timeShort(entry.lastModified)
                 } else {
                     Fmt.size(entry.size) + " · " + Fmt.timeShort(entry.lastModified)
                 },
@@ -1525,6 +1644,7 @@ private fun DrawerContent(
     storageUsed: Long,
     storageTotal: Long,
     bookmarks: List<String>,
+    recent: List<String>,
     onNavigate: (String) -> Unit,
     onBookmarks: () -> Unit,
     onSettings: () -> Unit,
@@ -1590,6 +1710,25 @@ private fun DrawerContent(
                     selected = currentPath == path,
                     onClick = { onNavigate(path) }
                 )
+            }
+
+            if (recent.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "最近访问",
+                    color = SunColors.TextTertiary,
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
+                )
+                recent.filter { it != currentPath }.take(4).forEach { path ->
+                    DrawerItem(
+                        icon = Icons.Outlined.History,
+                        label = path.substringAfterLast('/').ifEmpty { "/" },
+                        selected = false,
+                        onClick = { onNavigate(path) }
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

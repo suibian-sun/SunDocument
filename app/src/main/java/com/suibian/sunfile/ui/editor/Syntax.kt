@@ -8,6 +8,28 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.graphics.Color
+import com.suibian.sunfile.ui.theme.SunPalette
+
+/** 语法高亮配色，随主题切换 */
+data class CodeColors(
+    val keyword: Color,
+    val string: Color,
+    val comment: Color,
+    val number: Color,
+    val annotation: Color,
+    val tag: Color
+) {
+    companion object {
+        fun of(p: SunPalette) = CodeColors(
+            keyword = p.CodeKeyword,
+            string = p.CodeString,
+            comment = p.CodeComment,
+            number = p.CodeNumber,
+            annotation = p.CodeAnnotation,
+            tag = p.CodeTag
+        )
+    }
+}
 
 /** 语法高亮使用的语言 */
 enum class Lang(val label: String) {
@@ -55,13 +77,14 @@ data class LangSpec(
 
 object Syntax {
 
-    val KeywordColor = Color(0xFFC792EA)
-    val StringColor = Color(0xFF9ECE6A)
-    val CommentColor = Color(0xFF5F6B76)
-    val NumberColor = Color(0xFFE0AF68)
-    val AnnotationColor = Color(0xFF7DCFFF)
-    val TagColor = Color(0xFF7DCFFF)
-    val AttrColor = Color(0xFFE0AF68)
+    val DarkCode = CodeColors(
+        keyword = Color(0xFFC792EA),
+        string = Color(0xFF9ECE6A),
+        comment = Color(0xFF5F6B76),
+        number = Color(0xFFE0AF68),
+        annotation = Color(0xFF7DCFFF),
+        tag = Color(0xFF7DCFFF)
+    )
 
     private const val HIGHLIGHT_LIMIT = 90_000
 
@@ -239,7 +262,7 @@ object Syntax {
         Lang.PLAIN -> LangSpec()
     }
 
-    fun highlight(text: String, lang: Lang): AnnotatedString {
+    fun highlight(text: String, lang: Lang, colors: CodeColors = DarkCode): AnnotatedString {
         if (lang == Lang.PLAIN || text.length > HIGHLIGHT_LIMIT) return AnnotatedString(text)
         val spec = specOf(lang)
         val builder = AnnotatedString.Builder(text)
@@ -266,7 +289,7 @@ object Syntax {
             if (spec.blockStart != null && spec.blockEnd != null && text.startsWith(spec.blockStart, i)) {
                 val close = text.indexOf(spec.blockEnd, i + spec.blockStart.length)
                 val end = if (close < 0) n else close + spec.blockEnd.length
-                style(CommentColor, i, end, italic = true)
+                style(colors.comment, i, end, italic = true)
                 i = end
                 continue
             }
@@ -274,7 +297,7 @@ object Syntax {
             // 行注释
             if (spec.lineComment != null && text.startsWith(spec.lineComment, i)) {
                 val end = text.indexOf('\n', i).let { if (it < 0) n else it }
-                style(CommentColor, i, end, italic = true)
+                style(colors.comment, i, end, italic = true)
                 i = end
                 continue
             }
@@ -282,7 +305,7 @@ object Syntax {
             // 预处理指令
             if (spec.hashPreprocessor && c == '#' && (i == 0 || text[i - 1] == '\n')) {
                 val end = text.indexOf('\n', i).let { if (it < 0) n else it }
-                style(AnnotationColor, i, end)
+                style(colors.annotation, i, end)
                 i = end
                 continue
             }
@@ -293,7 +316,7 @@ object Syntax {
                 if (j < n && (text[j] == '/' || text[j] == '?' || text[j] == '!')) j++
                 val nameStart = j
                 while (j < n && (text[j].isLetterOrDigit() || text[j] == '-' || text[j] == ':' || text[j] == '_')) j++
-                if (j > nameStart) style(TagColor, nameStart, j, bold = true)
+                if (j > nameStart) style(colors.tag, nameStart, j, bold = true)
                 if (i + 1 < n && text[i + 1] == '!') {
                     // <!DOCTYPE ...> 或注释已处理
                 }
@@ -321,7 +344,7 @@ object Syntax {
                     }
                     j++
                 }
-                style(StringColor, i, end)
+                style(colors.string, i, end)
                 i = end
                 continue
             }
@@ -330,7 +353,7 @@ object Syntax {
             if (spec.annotation && c == '@') {
                 var j = i + 1
                 while (j < n && (text[j].isLetterOrDigit() || text[j] == '_' || text[j] == '.')) j++
-                style(AnnotationColor, i, j)
+                style(colors.annotation, i, j)
                 i = j
                 continue
             }
@@ -339,7 +362,7 @@ object Syntax {
             if (c.isDigit()) {
                 var j = i + 1
                 while (j < n && (text[j].isLetterOrDigit() || text[j] == '.' || text[j] == '_' || text[j] == 'x')) j++
-                style(NumberColor, i, j)
+                style(colors.number, i, j)
                 i = j
                 continue
             }
@@ -351,7 +374,7 @@ object Syntax {
                 val word = text.substring(i, j)
                 val lower = if (lang == Lang.SQL) word.uppercase() else word
                 if (lower in spec.keywords) {
-                    style(KeywordColor, i, j, bold = true)
+                    style(colors.keyword, i, j, bold = true)
                 }
                 i = j
                 continue
@@ -363,14 +386,19 @@ object Syntax {
     }
 
     /** 语法高亮的 VisualTransformation */
-    class CodeHighlightTransformation(private val lang: Lang) :
-        androidx.compose.ui.text.input.VisualTransformation {
+    class CodeHighlightTransformation(
+        private val lang: Lang,
+        private val colors: CodeColors = DarkCode
+    ) : androidx.compose.ui.text.input.VisualTransformation {
         override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText =
             androidx.compose.ui.text.input.TransformedText(
-                highlight(text.text, lang),
+                highlight(text.text, lang, colors),
                 androidx.compose.ui.text.input.OffsetMapping.Identity
             )
     }
+
+    /** 供补全引擎取得当前语言的关键字表 */
+    fun keywordsOf(lang: Lang): Set<String> = specOf(lang).keywords
 
     // ---------------- 代码补全 ----------------
 

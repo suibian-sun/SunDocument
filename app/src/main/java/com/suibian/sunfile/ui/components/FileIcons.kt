@@ -54,6 +54,7 @@ private val CODE_EXT = setOf(
     "xml", "html", "css", "yml", "yaml", "gradle", "vue", "svelte"
 )
 
+@Composable
 fun tintOf(file: File, isDir: Boolean = file.isDirectory): Color {
     if (isDir) return SunColors.Folder
     return when (FileKinds.kindOf(file)) {
