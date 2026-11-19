@@ -1,0 +1,102 @@
+name: Build SunFile APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            NAME="${GITHUB_REF_NAME#v}"
+          else
+            NAME="1.0.0+ci.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${NAME}"
+
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p keystore
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/release.jks
+            echo "keystore restored: $(stat -c %s keystore/release.jks) bytes"
+          else
+            echo "::warning::KEYSTORE_BASE64 未配置，本次构建将使用 debug 签名（无法覆盖安装正式版）"
+          fi
+
+      - name: Build release APK
+        env:
+          SIGNING_KEYSTORE: ${{ github.workspace }}/keystore/release.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -PappVersionName="${{ steps.ver.outputs.name }}" \
+            -PappVersionCode="${{ github.run_number }}"
+
+      - name: Verify signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK" | head -20
+
+      - name: Package APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/SunFile-${{ steps.ver.outputs.name }}.apk"
+          cd dist && sha256sum *.apk | tee SHA256SUMS.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunFile-${{ steps.ver.outputs.name }}
+          path: dist/*
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SunFile ${{ steps.ver.outputs.name }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/SunFile-${{ steps.ver.outputs.name }}.apk
+            dist/SHA256SUMS.txt
+          body: |
+            ## SunFile ${{ steps.ver.outputs.name }}
+
+            Android 双栏文件管理器，由 GitHub Actions 自动编译、使用固定密钥签名。
+
+            - 版本号：`${{ steps.ver.outputs.name }}`
+            - 版本代码：`${{ github.run_number }}`
+            - 构建提交：`${{ github.sha }}`
+
+            应用内「检查更新」会读取本 Release，支持多线路加速下载、进度显示与下载完成后自动调起系统安装程序。
