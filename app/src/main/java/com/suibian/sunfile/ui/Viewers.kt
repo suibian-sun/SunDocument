@@ -2,6 +2,9 @@ package com.suibian.sunfile.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
+import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -38,7 +41,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
@@ -47,10 +53,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +76,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -163,7 +174,6 @@ fun HexViewerOverlay(file: File, onClose: () -> Unit) {
     val size = remember(file) { file.length() }
     var offset by remember { mutableLongStateOf(0L) }
     var chunk by remember { mutableStateOf<ByteArray?>(null) }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(offset, file) {
         chunk = null
@@ -366,12 +376,6 @@ fun ImageViewerOverlay(file: File, onClose: () -> Unit) {
                 }
             }
 
-            Text(
-                "双指缩放 · 双击放大 · 拖动平移",
-                color = Color.White.copy(alpha = 0.45f),
-                fontSize = 9.5.sp,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
-            )
         }
     }
 }
@@ -396,9 +400,11 @@ private data class ArcNode(val name: String, val full: String, val isDir: Boolea
 @Composable
 fun ArchiveOverlay(
     file: File,
+    destDir: File,
     onClose: () -> Unit,
     onExtractAll: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var entries by remember(file) { mutableStateOf<List<FileRepo.ZipItem>?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     var prefix by remember(file) { mutableStateOf("") }
@@ -524,12 +530,7 @@ fun ArchiveOverlay(
             ) {
                 Icon(Icons.Outlined.Archive, null, tint = SunColors.TextTertiary, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "点击文件预览，右上角可解压全部",
-                    color = SunColors.TextTertiary,
-                    fontSize = 9.5.sp,
-                    modifier = Modifier.weight(1f)
-                )
+                Spacer(Modifier.weight(1f))
                 Text(
                     "解压全部",
                     color = SunColors.Accent,
@@ -560,7 +561,7 @@ fun ArchiveOverlay(
             text = {
                 Column {
                     Text(
-                        if (isText) "文本预览（最多 256KB）" else "二进制预览（前 1KB）",
+                        if (isText) "文本" else "二进制",
                         color = SunColors.TextTertiary,
                         fontSize = 9.sp
                     )
@@ -578,8 +579,25 @@ fun ArchiveOverlay(
                 }
             },
             confirmButton = {
+                TextButton(onClick = {
+                    preview = null
+                    scope.launch {
+                        val out = withContext(Dispatchers.IO) {
+                            runCatching { FileRepo.extractZipEntry(file, name, destDir) }.getOrNull()
+                        }
+                        android.widget.Toast.makeText(
+                            context,
+                            if (out != null) "已解压到 ${out.parentFile?.name ?: "/"}" else "解压失败",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }) {
+                    Text("解压此文件", color = SunColors.Accent, fontSize = 13.sp)
+                }
+            },
+            dismissButton = {
                 TextButton(onClick = { preview = null }) {
-                    Text("关闭", color = SunColors.Accent, fontSize = 13.sp)
+                    Text("关闭", color = SunColors.TextSecondary, fontSize = 13.sp)
                 }
             }
         )
@@ -638,3 +656,285 @@ private fun hexPreview(data: ByteArray): String {
     }
     return sb.toString()
 }
+
+// ---------------- 视频播放器 ----------------
+
+private fun clock(ms: Int): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    val m = total / 60
+    val s = total % 60
+    return String.format(Locale.US, "%d:%02d", m, s)
+}
+
+@Composable
+fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
+    var video by remember { mutableStateOf<VideoView?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    var duration by remember { mutableIntStateOf(0) }
+    var position by remember { mutableIntStateOf(0) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var controls by remember { mutableStateOf(true) }
+
+    // 控制条几秒后自动隐去，只留画面
+    LaunchedEffect(controls, playing) {
+        if (controls) {
+            delay(3000)
+            controls = false
+        }
+    }
+    LaunchedEffect(playing) {
+        while (playing) {
+            position = video?.currentPosition ?: 0
+            delay(320)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { runCatching { video?.stopPlayback() } }
+    }
+
+    OverlayShell(
+        title = file.name,
+        subtitle = Fmt.size(file.length()),
+        onClose = onClose,
+        background = Color.Black
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) { detectTapGestures { controls = !controls } }
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setOnPreparedListener { mp ->
+                            duration = mp.duration
+                            mp.isLooping = false
+                            start()
+                            playing = true
+                        }
+                        setOnCompletionListener { playing = false }
+                        setOnErrorListener { _, _, _ ->
+                            failure = "这个视频无法解码"
+                            true
+                        }
+                        setVideoPath(file.absolutePath)
+                        video = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            failure?.let {
+                Text(
+                    it,
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = controls,
+                enter = androidx.compose.animation.fadeIn(tween(160)),
+                exit = androidx.compose.animation.fadeOut(tween(220)),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                val v = video ?: return@IconButton
+                                if (v.isPlaying) {
+                                    v.pause()
+                                    playing = false
+                                } else {
+                                    v.start()
+                                    playing = true
+                                }
+                                controls = true
+                            },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (playing) "暂停" else "播放",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Text(clock(position), color = Color.White.copy(alpha = 0.8f), style = NumberStyle)
+                        Slider(
+                            value = position.toFloat(),
+                            onValueChange = {
+                                position = it.toInt()
+                                video?.seekTo(it.toInt())
+                            },
+                            valueRange = 0f..(duration.coerceAtLeast(1)).toFloat(),
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = SunColors.Accent,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                            ),
+                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp)
+                        )
+                        Text(clock(duration), color = Color.White.copy(alpha = 0.8f), style = NumberStyle)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------- 音频播放器 ----------------
+
+@Composable
+fun AudioViewerOverlay(file: File, onClose: () -> Unit) {
+    var player by remember { mutableStateOf<MediaPlayer?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    var duration by remember { mutableIntStateOf(0) }
+    var position by remember { mutableIntStateOf(0) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var cover by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(file) {
+        cover = withContext(Dispatchers.IO) { embeddedCover(file) }
+    }
+    DisposableEffect(Unit) {
+        val mp = MediaPlayer()
+        runCatching { mp.setDataSource(file.absolutePath) }
+            .onFailure { failure = it.message ?: "无法播放" }
+        mp.setOnPreparedListener { duration = it.duration }
+        mp.setOnErrorListener { _, _, _ ->
+            failure = "这个音频无法解码"
+            true
+        }
+        mp.setOnCompletionListener { playing = false }
+        runCatching { mp.prepareAsync() }
+        player = mp
+        onDispose { runCatching { mp.release() } }
+    }
+    LaunchedEffect(playing) {
+        while (playing) {
+            position = runCatching { player?.currentPosition ?: 0 }.getOrDefault(0)
+            delay(300)
+        }
+    }
+
+    OverlayShell(
+        title = file.name,
+        subtitle = Fmt.size(file.length()),
+        onClose = onClose,
+        background = SunColors.Bg
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                Modifier
+                    .size(210.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                    .background(SunColors.Surface2),
+                contentAlignment = Alignment.Center
+            ) {
+                val bmp = cover
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.Audiotrack,
+                        null,
+                        tint = SunColors.Accent.copy(alpha = 0.75f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(26.dp))
+            Text(
+                file.nameWithoutExtension,
+                color = SunColors.TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                failure ?: file.parent?.substringAfterLast('/').orEmpty(),
+                color = if (failure != null) SunColors.Danger else SunColors.TextTertiary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(Modifier.height(22.dp))
+            Slider(
+                value = position.toFloat(),
+                onValueChange = {
+                    position = it.toInt()
+                    runCatching { player?.seekTo(it.toInt()) }
+                },
+                valueRange = 0f..(duration.coerceAtLeast(1)).toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = SunColors.Accent,
+                    activeTrackColor = SunColors.Accent,
+                    inactiveTrackColor = SunColors.Surface4
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(clock(position), color = SunColors.TextTertiary, style = NumberStyle)
+                Text(clock(duration), color = SunColors.TextTertiary, style = NumberStyle)
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(SunColors.Accent)
+                    .clickable(enabled = failure == null) {
+                        val mp = player ?: return@clickable
+                        if (playing) {
+                            runCatching { mp.pause() }
+                            playing = false
+                        } else {
+                            runCatching { mp.start() }
+                            playing = true
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (playing) "暂停" else "播放",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun embeddedCover(file: File): Bitmap? = runCatching {
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(file.absolutePath)
+        val data = retriever.embeddedPicture
+        if (data != null) BitmapFactory.decodeByteArray(data, 0, data.size) else null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}.getOrNull()

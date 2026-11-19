@@ -109,6 +109,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -138,6 +139,7 @@ import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
 import com.suibian.sunfile.ui.components.RollingNumber
 import com.suibian.sunfile.ui.components.ShimmerList
+import com.suibian.sunfile.ui.components.FileTypeBadge
 import com.suibian.sunfile.ui.components.iconOf
 import com.suibian.sunfile.ui.components.pressScale
 import com.suibian.sunfile.ui.components.tintOf
@@ -166,6 +168,8 @@ private sealed interface Viewer {
     data class Hex(val file: File) : Viewer
     data class Image(val file: File) : Viewer
     data class Archive(val file: File) : Viewer
+    data class Audio(val file: File) : Viewer
+    data class Video(val file: File) : Viewer
 }
 
 @Composable
@@ -254,6 +258,8 @@ fun MainScreen(
             }
             OpenMode.HEX -> viewer = Viewer.Hex(file)
             OpenMode.IMAGE -> viewer = Viewer.Image(file)
+            OpenMode.AUDIO -> viewer = Viewer.Audio(file)
+            OpenMode.VIDEO -> viewer = Viewer.Video(file)
             OpenMode.ARCHIVE -> viewer = Viewer.Archive(file)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
@@ -359,6 +365,7 @@ fun MainScreen(
                         onForward = { vm.goForward() },
                         onNew = { sheet = SheetKind.New },
                         onSwap = { vm.swapPanes() },
+                        onSync = { vm.syncPanes() },
                         onSelectionCopy = { vm.setClipboard(false) },
                         onSelectionCut = { vm.setClipboard(true) },
                         onSelectionDelete = { dialog = DialogKind.Delete(pane.selected.toList()) },
@@ -503,7 +510,14 @@ fun MainScreen(
                 vm.toggleBookmark(if (s.entry.isDir) s.entry.path else (s.entry.file.parent ?: s.entry.path))
                 sheet = null
             },
-            onDelete = { sheet = null; dialog = DialogKind.Delete(listOf(s.entry.path)) }
+            onDelete = { sheet = null; dialog = DialogKind.Delete(listOf(s.entry.path)) },
+            onInstall = {
+                sheet = null
+                if (!installApk(context, s.entry.file)) {
+                    Toast.makeText(context, "无法启动安装程序", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onOpenAsText = { sheet = null; openWith(s.entry.file, OpenMode.TEXT) }
         )
 
         is SheetKind.Path -> PathSheet(
@@ -731,8 +745,11 @@ fun MainScreen(
     when (val v = viewer) {
         is Viewer.Hex -> HexViewerOverlay(v.file) { viewer = null }
         is Viewer.Image -> ImageViewerOverlay(v.file) { viewer = null }
+        is Viewer.Audio -> AudioViewerOverlay(v.file) { viewer = null }
+        is Viewer.Video -> VideoViewerOverlay(v.file) { viewer = null }
         is Viewer.Archive -> ArchiveOverlay(
             file = v.file,
+            destDir = panes[active].currentDir,
             onClose = { viewer = null },
             onExtractAll = {
                 val dest = panes[active].currentDir
@@ -773,6 +790,7 @@ private fun FilesPage(
     onForward: () -> Unit,
     onNew: () -> Unit,
     onSwap: () -> Unit,
+    onSync: () -> Unit,
     onSelectionCopy: () -> Unit,
     onSelectionCut: () -> Unit,
     onSelectionDelete: () -> Unit,
@@ -876,7 +894,7 @@ private fun FilesPage(
             onBack = onBack,
             onForward = onForward,
             onNew = onNew,
-            onSwap = onSwap,
+            onSync = onSync,
             onUp = { onUp(active) },
             onCopy = onSelectionCopy,
             onCut = onSelectionCut,
@@ -1247,8 +1265,6 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
             fontSize = 11.5.sp,
             fontFamily = FontFamily.Monospace
         )
-        Spacer(Modifier.width(6.dp))
-        Text("上一级", color = SunColors.TextTertiary.copy(alpha = 0.6f), fontSize = 9.sp)
     }
 }
 
@@ -1451,11 +1467,11 @@ private fun FileRow(
             .padding(start = 9.dp, end = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = iconOf(entry.file, entry.isDir),
-            contentDescription = null,
-            tint = tintOf(entry.file, entry.isDir).let { if (entry.canRead) it else it.copy(alpha = 0.4f) },
-            modifier = Modifier.size(19.dp)
+        FileTypeBadge(
+            file = entry.file,
+            isDir = entry.isDir,
+            size = 26.dp,
+            modifier = Modifier.alpha(if (entry.canRead) 1f else 0.45f)
         )
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
@@ -1517,7 +1533,7 @@ private fun BottomBar(
     onBack: () -> Unit,
     onForward: () -> Unit,
     onNew: () -> Unit,
-    onSwap: () -> Unit,
+    onSync: () -> Unit,
     onUp: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
@@ -1551,7 +1567,7 @@ private fun BottomBar(
                     BarIcon(Icons.AutoMirrored.Outlined.ArrowBack, "后退", canBack, onBack)
                     BarIcon(Icons.Outlined.ArrowForward, "前进", canForward, onForward)
                     BarIcon(Icons.Outlined.Add, "新建", true, onNew)
-                    BarIcon(Icons.Outlined.SwapHoriz, "交换窗口", true, onSwap)
+                    BarIcon(Icons.Outlined.SwapHoriz, "同步窗口", true, onSync)
                     BarIcon(Icons.Outlined.ArrowUpward, "上一级", canUp, onUp)
                 } else {
                     BarIcon(Icons.Outlined.ContentCopy, "复制", true, onCopy)
@@ -1802,6 +1818,20 @@ internal fun openExternally(context: Context, file: File): Boolean {
         val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+}
+
+/** 调用系统安装器安装 APK */
+internal fun installApk(context: Context, file: File): Boolean {
+    return runCatching {
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }

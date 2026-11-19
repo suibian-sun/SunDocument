@@ -37,8 +37,9 @@ data class PaneState(
     val token: Int = 0,
     val navDirection: Int = 0
 ) {
-    val dirCount: Int get() = entries.count { it.isDir }
-    val fileCount: Int get() = entries.size - dirCount
+    // 列表可能上千项，计数只在真正用到时算一次
+    val dirCount: Int by lazy { entries.count { it.isDir } }
+    val fileCount: Int by lazy { entries.size - dirCount }
     val selectionMode: Boolean get() = selected.isNotEmpty()
     val canBack: Boolean get() = back.isNotEmpty()
     val canForward: Boolean get() = forward.isNotEmpty()
@@ -241,18 +242,39 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _storage.value = StorageStats.of(_panes.value[_active.value].path)
     }
 
-    /** 交换两个窗口的内容 */
+    /**
+     * 交换两个窗口：交换路径与历史，然后各自重新枚举。
+     * 之前的实现只换了对象，两栏本来就在同一目录时看不出任何变化，
+     * 现在会强制刷新，列表、计数、滚动位置都跟着换过去。
+     */
     fun swapPanes() {
         val list = _panes.value
-        _panes.value = listOf(list[1], list[0])
+        if (list.size < 2) return
+        val a = list[0]
+        val b = list[1]
+        _panes.value = listOf(
+            b.copy(selected = emptySet()),
+            a.copy(selected = emptySet())
+        )
+        for (i in 0..1) {
+            val p = _panes.value[i]
+            if (p.path.isNotEmpty()) load(i, p.path, record = false, pushHistory = false)
+        }
         _storage.value = StorageStats.of(_panes.value[_active.value].path)
-        _messages.tryEmit("已交换 A / B 窗口")
+        _messages.tryEmit("已交换两栏")
     }
 
-    /** 把另一栏的路径同步到当前栏 */
-    fun copyOtherPathToActive() {
-        val other = _panes.value[1 - _active.value]
-        if (other.path.isNotEmpty()) navigate(other.path)
+    /** 把当前栏的目录同步给另一栏，让两边显示同一位置 */
+    fun syncPanes() {
+        val src = _panes.value[_active.value]
+        val dst = 1 - _active.value
+        if (src.path.isEmpty()) return
+        if (_panes.value[dst].path == src.path) {
+            _messages.tryEmit("两栏已在同一目录")
+            return
+        }
+        load(dst, src.path, record = true, pushHistory = true)
+        _messages.tryEmit("已同步到另一栏")
     }
 
     // ---------------- 选择 ----------------

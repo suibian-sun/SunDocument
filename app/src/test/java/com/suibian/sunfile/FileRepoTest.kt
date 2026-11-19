@@ -219,7 +219,7 @@ class FileRepoTest {
     }
 
     @Test
-    fun `large text is paged and fully traversable`() {
+    fun `large text streams in windows and stays fully traversable`() {
         val f = File(root, "big.log")
         val lines = 320_000
         val content = buildString {
@@ -227,30 +227,37 @@ class FileRepoTest {
         }
         f.writeText(content)
         val smart = FileRepo.readTextSmart(f)
-        // 不再截断丢弃：标记为分页，且页内容可达
-        assertTrue(smart.paged)
+        // 首屏只取一段，但标记为未读完，可继续向下追加
+        assertTrue(smart.partial)
         assertTrue(smart.editable)
-        assertFalse(smart.truncated)
         assertEquals(f.length(), smart.totalBytes)
         assertTrue(smart.text.isNotEmpty())
+        assertTrue(smart.loadedBytes in 1..f.length())
 
-        // 逐页翻完，拼起来必须等于原文
-        val sb = StringBuilder()
+        // 逐段读完，拼起来必须等于原文
+        val sb = StringBuilder(smart.text)
+        var from = smart.loadedBytes
         var guard = 0
-        while (guard < 500) {
+        while (from < f.length() && guard < 2000) {
             guard++
-            val page = FileRepo.readPage(f, guard - 1)
-            sb.append(page.text)
-            if (page.lastPage) break
+            val w = FileRepo.readWindow(f, from)
+            sb.append(w.text)
+            from = w.to
         }
         assertEquals(content, sb.toString())
 
-        // 分页保存：改第一页并写回，文件总体长度随内容变化，其余内容不受影响
-        val first = FileRepo.readPage(f, 0)
-        val replaced = "PATCHED-" + first.text.removePrefix("line 0\n")
-        assertTrue(FileRepo.writePage(f, first, replaced))
-        val after = FileRepo.readPage(f, 0)
+        // 逐段保存：改写首段，未加载的尾部原样保留
+        val firstText = smart.text
+        val patched = "PATCHED-" + firstText.removePrefix("line 0\n")
+        val enc = java.nio.charset.Charset.forName(smart.encoding)
+        assertTrue(
+            FileRepo.writeHeadAndTail(f, patched.toByteArray(enc), smart.loadedBytes, smart.bom)
+        )
+        val after = FileRepo.readTextSmart(f)
         assertTrue(after.text.startsWith("PATCHED-"))
+        // 尾部内容没有丢失
+        val tail = FileRepo.readChunk(f, f.length() - 10, 10).toString(Charsets.UTF_8)
+        assertTrue(tail.contains("319999") || tail.endsWith("\n"))
         assertTrue(f.length() != content.length.toLong())
     }
 

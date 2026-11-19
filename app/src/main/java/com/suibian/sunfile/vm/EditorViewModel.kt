@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.HistoryStore
 import com.suibian.sunfile.data.Revision
-import com.suibian.sunfile.data.TextPage
 import com.suibian.sunfile.ui.editor.Lang
 import com.suibian.sunfile.ui.editor.Syntax
 import kotlinx.coroutines.Dispatchers
@@ -17,11 +16,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.charset.Charset
 
+/**
+ * 编辑器状态：文本按「段」逐步载入，
+ * [loadedBytes] 是已经进入编辑缓冲区的字节数，超过它的部分仍留在磁盘上。
+ */
 data class EditorState(
     val file: File? = null,
     val text: String = "",
-    val savedText: String = "",
+    /** 上一次保存时的内容，只用于判断是否有改动 */
+    val baseline: String = "",
     val loading: Boolean = false,
     val saving: Boolean = false,
     val error: String? = null,
@@ -31,20 +36,19 @@ data class EditorState(
     val readOnly: Boolean = false,
     val totalBytes: Long = 0,
     val lang: Lang = Lang.PLAIN,
-    /** 外部替换文本（打开、撤销、恢复历史）时自增，用于让输入框重新同步 */
+    /** 外部替换文本（打开、撤销、恢复历史）时自增，让输入框重新同步 */
     val syncToken: Int = 0,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    /** 超大文件分页编辑 */
-    val paged: Boolean = false,
-    val pageIndex: Int = 0,
-    val pageCount: Int = 1,
-    val pageOffset: Long = 0,
-    val pageBytes: Int = 0
+    /** 已经载入的字节数（从文件开头算起） */
+    val loadedBytes: Long = 0,
+    /** 文件还有未载入的尾段 */
+    val partial: Boolean = false,
+    val loadingMore: Boolean = false,
+    val bom: Boolean = false
 ) {
-    val dirty: Boolean get() = file != null && text != savedText
-    val hasPrevPage: Boolean get() = paged && pageIndex > 0
-    val hasNextPage: Boolean get() = paged && pageIndex < pageCount - 1
+    val dirty: Boolean get() = file != null && text != baseline
+    val hasMore: Boolean get() = partial && loadedBytes < totalBytes
 }
 
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
@@ -57,133 +61,115 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val _toast = MutableSharedFlow<String>(extraBufferCapacity = 6)
     val toast: SharedFlow<String> = _toast
 
-    private val undoStack = ArrayDeque<String>()
-    private val redoStack = ArrayDeque<String>()
+    private val undoStack = ArrayDeque<Pair<String, Int>>()
+    private val redoStack = ArrayDeque<Pair<String, Int>>()
     private var lastSnapshotAt = 0L
-    private var currentPage: TextPage? = null
+    private var lastSnapshotLen = 0
+    private var undoChars = 0L
 
-    fun open(file: File, pageIndex: Int = 0) {
+    private val maxUndoChars = 8L * 1024 * 1024
+
+    fun open(file: File) {
         undoStack.clear()
         redoStack.clear()
-        currentPage = null
+        undoChars = 0
+        lastSnapshotLen = 0
         _state.value = EditorState(file = file, loading = true, lang = Syntax.langFor(file.name))
         viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                runCatching {
-                    val content = FileRepo.readTextSmart(file)
-                    if (content.paged) {
-                        val page = FileRepo.readPage(file, pageIndex)
-                        Loaded(page, null)
-                    } else {
-                        Loaded(null, content)
-                    }
-                }
-            }
-            loaded.onSuccess { l ->
-                val page = l.page
-                val content = l.content
-                if (page != null) {
-                    applyPage(file, page)
-                } else if (content != null) {
-                    val text = content.text
-                    _state.value = EditorState(
-                        file = file,
-                        text = text,
-                        savedText = text,
-                        loading = false,
-                        revisionCount = history.revisions(file).size,
-                        lineCount = text.count { it == '\n' } + 1,
-                        totalBytes = content.totalBytes,
-                        encoding = content.encoding,
-                        lang = Syntax.langFor(file.name),
-                        syncToken = 1
-                    )
-                }
+            val content = withContext(Dispatchers.IO) { runCatching { FileRepo.readTextSmart(file) } }
+            content.onSuccess { c ->
+                _state.value = EditorState(
+                    file = file,
+                    text = c.text,
+                    baseline = c.text,
+                    loading = false,
+                    revisionCount = history.revisions(file).size,
+                    lineCount = c.text.count { it == '\n' } + 1,
+                    totalBytes = c.totalBytes,
+                    encoding = c.encoding,
+                    lang = Syntax.langFor(file.name),
+                    syncToken = 1,
+                    loadedBytes = c.loadedBytes,
+                    partial = c.partial,
+                    bom = c.bom,
+                    readOnly = false
+                )
+                lastSnapshotLen = c.text.length
             }.onFailure { e ->
                 _state.value = EditorState(file = file, loading = false, error = e.message ?: "读取失败")
             }
         }
     }
 
-    private data class Loaded(val page: TextPage?, val content: com.suibian.sunfile.data.TextContent?)
-
-    private fun applyPage(file: File, page: TextPage, keepDiff: Boolean = false) {
-        currentPage = page
-        val s = _state.value
-        _state.value = s.copy(
-            file = file,
-            text = page.text,
-            savedText = if (keepDiff) s.savedText else page.text,
-            loading = false,
-            error = null,
-            revisionCount = history.revisions(file).size,
-            encoding = page.encoding,
-            lineCount = page.text.count { it == '\n' } + 1,
-            readOnly = false,
-            totalBytes = page.totalBytes,
-            lang = Syntax.langFor(file.name),
-            syncToken = s.syncToken + 1,
-            paged = true,
-            pageIndex = page.pageIndex,
-            pageCount = page.pageCount,
-            pageOffset = page.offset,
-            pageBytes = page.bytes,
-            canUndo = undoStack.isNotEmpty(),
-            canRedo = redoStack.isNotEmpty()
-        )
-    }
-
-    /** 翻页：当前页有改动先落盘，再读取目标页 */
-    fun gotoPage(index: Int, onDone: () -> Unit = {}) {
+    /**
+     * 向下滚动到末尾时继续读取下一段。文本由界面持有，
+     * 这里同步追加到状态里（用于保存），并通过回调把新片段交给输入框。
+     */
+    fun loadMore(onAppend: (String) -> Unit = {}) {
         val s = _state.value
         val file = s.file ?: return
-        if (!s.paged || index < 0 || index >= s.pageCount) return
+        if (!s.hasMore || s.loadingMore || s.loading) return
+        _state.value = s.copy(loadingMore = true)
         viewModelScope.launch {
-            if (s.dirty) {
-                val saved = withContext(Dispatchers.IO) { persistPage(s) }
-                if (!saved) {
-                    _toast.tryEmit("当前页保存失败，已停在原页")
-                    return@launch
-                }
+            val w = withContext(Dispatchers.IO) {
+                runCatching { FileRepo.readWindow(file, s.loadedBytes) }.getOrNull()
             }
-            val page = withContext(Dispatchers.IO) { runCatching { FileRepo.readPage(file, index) }.getOrNull() }
-            if (page == null) {
-                _toast.tryEmit("读取第 ${index + 1} 页失败")
+            if (w == null || w.text.isEmpty()) {
+                _state.value = _state.value.copy(loadingMore = false, partial = false)
                 return@launch
             }
-            undoStack.clear()
-            redoStack.clear()
-            applyPage(file, page)
-            onDone()
+            val cur = _state.value
+            val nextText = cur.text + w.text
+            _state.value = cur.copy(
+                text = nextText,
+                baseline = cur.baseline + w.text,
+                loadedBytes = w.to,
+                partial = w.partial,
+                loadingMore = false,
+                lineCount = nextText.count { it == '\n' } + 1
+            )
+            onAppend(w.text)
         }
     }
 
-    fun nextPage(onDone: () -> Unit = {}) = gotoPage(_state.value.pageIndex + 1, onDone)
-
-    fun prevPage(onDone: () -> Unit = {}) = gotoPage(_state.value.pageIndex - 1, onDone)
-
+    /** 输入时光标所在行等内容由界面自己算；这里只记录文本与撤销栈 */
     fun updateText(text: String) {
         val s = _state.value
-        if (s.readOnly) return
+        if (s.readOnly || s.text == text) return
         val now = System.currentTimeMillis()
-        if (now - lastSnapshotAt > 450 && s.text != text && s.text.isNotEmpty()) {
+        val grew = kotlin.math.abs(text.length - lastSnapshotLen)
+        if (now - lastSnapshotAt > 600 && s.text.isNotEmpty() && grew > 0) {
             lastSnapshotAt = now
-            undoStack.addLast(s.text)
-            while (undoStack.size > 40) undoStack.removeFirst()
-            redoStack.clear()
+            lastSnapshotLen = text.length
+            pushUndo(s.text)
         }
         _state.value = s.copy(
             text = text,
-            lineCount = text.count { it == '\n' } + 1,
-            canUndo = undoStack.isNotEmpty(),
-            canRedo = redoStack.isNotEmpty()
+            // 分段载入的文件撤销会与未载入的尾段错位，这里直接关闭，避免写坏文件
+            canUndo = !s.partial && undoStack.isNotEmpty(),
+            canRedo = !s.partial && redoStack.isNotEmpty()
         )
+    }
+
+    private fun pushUndo(text: String) {
+        undoStack.addLast(text to text.length)
+        undoChars += text.length
+        while (undoStack.size > 24 || (undoChars > maxUndoChars && undoStack.size > 1)) {
+            val removed = undoStack.removeFirst()
+            undoChars -= removed.second
+        }
+        redoStack.clear()
     }
 
     fun undo() {
         val s = _state.value
-        val prev = undoStack.removeLastOrNull() ?: return
-        redoStack.addLast(s.text)
+        if (s.partial) {
+            _toast.tryEmit("超长文件暂不支持撤销")
+            return
+        }
+        val (prev, len) = undoStack.removeLastOrNull() ?: return
+        undoChars -= len
+        redoStack.addLast(s.text to s.text.length)
         _state.value = s.copy(
             text = prev,
             lineCount = prev.count { it == '\n' } + 1,
@@ -195,8 +181,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun redo() {
         val s = _state.value
-        val next = redoStack.removeLastOrNull() ?: return
-        undoStack.addLast(s.text)
+        if (s.partial) return
+        val (next, _) = redoStack.removeLastOrNull() ?: return
+        pushUndo(s.text)
         _state.value = s.copy(
             text = next,
             lineCount = next.count { it == '\n' } + 1,
@@ -209,8 +196,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /** 用新文本替换编辑器内容（历史版本恢复、格式化等） */
     fun replaceText(text: String) {
         val s = _state.value
-        undoStack.addLast(s.text)
-        redoStack.clear()
+        pushUndo(s.text)
         _state.value = s.copy(
             text = text,
             lineCount = text.count { it == '\n' } + 1,
@@ -220,11 +206,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /** 保存：先把磁盘上的旧内容存为历史版本，再写入新内容 */
-    fun save(onSaved: (Boolean) -> Unit = {}) {
+    /**
+     * 保存：完整文件直接覆盖；只载入了一段时，把未加载的尾部原样接回去。
+     * [text] 由界面传入，保证写入的是用户此刻看到的内容。
+     */
+    fun save(text: String? = null, onSaved: (Boolean) -> Unit = {}) {
         val s = _state.value
         val file = s.file ?: return
-        if (!s.dirty) {
+        val content = text ?: s.text
+        if (content == s.baseline) {
             _toast.tryEmit("内容没有变化")
             onSaved(false)
             return
@@ -234,18 +224,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (s.paged) {
-                        persistPage(s)
+                    val cs = runCatching { Charset.forName(s.encoding) }.getOrDefault(Charsets.UTF_8)
+                    if (s.partial) {
+                        val bytes = content.toByteArray(cs)
+                        val ok = FileRepo.writeHeadAndTail(file, bytes, s.loadedBytes, s.bom)
+                        if (ok) (if (s.bom) 3 else 0) + bytes.size else -1
                     } else {
                         val previous = runCatching { FileRepo.readText(file) }.getOrNull()
-                        if (previous != null && previous != s.text) history.snapshot(file, previous)
-                        FileRepo.writeText(file, s.text, s.encoding)
-                        true
+                        if (previous != null && previous != content) history.snapshot(file, previous)
+                        FileRepo.writeText(file, content, s.encoding)
+                        0
                     }
                 }
             }
-            result.onSuccess { ok ->
-                if (!ok) {
+            result.onSuccess { newLoaded ->
+                if (newLoaded < 0) {
                     _state.value = _state.value.copy(saving = false)
                     _toast.tryEmit("保存失败：没有写入权限")
                     onSaved(false)
@@ -253,38 +246,19 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 undoStack.clear()
                 redoStack.clear()
-                // 分页模式下长度可能变化，重新读取该页拿到新边界
-                val refreshed = if (s.paged) {
-                    withContext(Dispatchers.IO) {
-                        runCatching { FileRepo.readPage(file, s.pageIndex) }.getOrNull()
-                    }
-                } else null
-                if (refreshed != null) {
-                    currentPage = refreshed
-                    _state.value = _state.value.copy(
-                        savedText = refreshed.text,
-                        saving = false,
-                        text = refreshed.text,
-                        syncToken = _state.value.syncToken + 1,
-                        revisionCount = history.revisions(file).size,
-                        pageCount = refreshed.pageCount,
-                        pageOffset = refreshed.offset,
-                        pageBytes = refreshed.bytes,
-                        totalBytes = refreshed.totalBytes,
-                        lineCount = refreshed.text.count { it == '\n' } + 1,
-                        canUndo = false,
-                        canRedo = false
-                    )
-                } else {
-                    _state.value = _state.value.copy(
-                        savedText = s.text,
-                        saving = false,
-                        revisionCount = history.revisions(file).size,
-                        canUndo = false,
-                        canRedo = false
-                    )
-                }
-                _toast.tryEmit(if (s.paged) "第 ${s.pageIndex + 1} 页已写入" else "已保存")
+                undoChars = 0
+                lastSnapshotLen = content.length
+                _state.value = _state.value.copy(
+                    text = content,
+                    baseline = content,
+                    saving = false,
+                    revisionCount = history.revisions(file).size,
+                    totalBytes = runCatching { file.length() }.getOrDefault(s.totalBytes),
+                    loadedBytes = if (s.partial) newLoaded.toLong() else runCatching { file.length() }.getOrDefault(0L),
+                    canUndo = false,
+                    canRedo = false
+                )
+                _toast.tryEmit("已保存")
                 onSaved(true)
             }.onFailure { e ->
                 _state.value = _state.value.copy(saving = false)
@@ -294,19 +268,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun persistPage(s: EditorState): Boolean {
-        val file = s.file ?: return false
-        val page = currentPage ?: return false
-        val ok = FileRepo.writePage(file, page, s.text)
-        if (ok) {
-            runCatching { history.snapshot(file, page.text) }
-        }
-        return ok
-    }
-
-    fun saveAs(name: String, onDone: (Boolean) -> Unit = {}) {
+    fun saveAs(name: String, text: String? = null, onDone: (Boolean) -> Unit = {}) {
         val s = _state.value
         val file = s.file ?: return
+        val content = text ?: s.text
         if (name.isBlank() || name.contains("/")) {
             _toast.tryEmit("文件名不合法")
             onDone(false)
@@ -321,14 +286,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     if (target.exists() && target.absolutePath != file.absolutePath) {
                         throw java.io.IOException("同名文件已存在")
                     }
-                    FileRepo.writeText(target, s.text, s.encoding)
+                    val cs = runCatching { Charset.forName(s.encoding) }.getOrDefault(Charsets.UTF_8)
+                    if (s.partial) {
+                        FileRepo.writeHeadAndTail(target, content.toByteArray(cs), s.loadedBytes, s.bom)
+                        Unit
+                    } else {
+                        FileRepo.writeText(target, content, s.encoding)
+                    }
                     target
                 }
             }
             result.onSuccess { target ->
                 _state.value = _state.value.copy(
                     file = target,
-                    savedText = s.text,
+                    text = content,
+                    baseline = content,
                     saving = false,
                     lang = Syntax.langFor(target.name),
                     readOnly = false
@@ -364,16 +336,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         _toast.tryEmit("已清除该文件的历史版本")
     }
 
-    /** 文件被外部修改后重新载入 */
     fun reload() {
         val f = _state.value.file ?: return
-        open(f, _state.value.pageIndex)
+        open(f)
     }
 
     fun reset() {
         undoStack.clear()
         redoStack.clear()
-        currentPage = null
+        undoChars = 0
+        lastSnapshotLen = 0
         _state.value = EditorState()
     }
 }

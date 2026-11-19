@@ -40,6 +40,8 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Share
@@ -243,8 +245,12 @@ fun EntrySheet(
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onBookmark: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onInstall: () -> Unit = {},
+    onOpenAsText: () -> Unit = {}
 ) {
+    val kind = FileKinds.kindOf(entry.file)
+    val isApk = entry.file.extension.equals("apk", true)
     Sheet(onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp)) {
             Text(
@@ -269,6 +275,12 @@ fun EntrySheet(
         )
         if (!entry.isDir) {
             SheetRow(Icons.Outlined.OpenInNew, "打开方式…", onOpenWith)
+        }
+        if (isApk) {
+            SheetRow(Icons.Outlined.Terminal, "安装", onInstall)
+        }
+        if (!entry.isDir && kind != com.suibian.sunfile.data.FileKind.TEXT) {
+            SheetRow(Icons.Outlined.TextFields, "用文本打开", onOpenAsText)
         }
         SheetRow(Icons.Outlined.DriveFileRenameOutline, "重命名", onRename)
         SheetRow(Icons.Outlined.Info, "属性", onProperties)
@@ -448,12 +460,16 @@ fun OpenWithSheet(
 ) {
     var remember by remember { mutableStateOf(false) }
     val rawExt = FileKinds.extensionOf(file)
-    val ext = rawExt.ifEmpty { "无扩展名" }
     val extLabel = if (rawExt.isEmpty()) "" else ".$rawExt"
     val modes = buildList {
         add(OpenMode.TEXT)
         add(OpenMode.HEX)
-        if (FileKinds.kindOf(file) == com.suibian.sunfile.data.FileKind.IMAGE) add(OpenMode.IMAGE)
+        when (FileKinds.kindOf(file)) {
+            com.suibian.sunfile.data.FileKind.IMAGE -> add(OpenMode.IMAGE)
+            com.suibian.sunfile.data.FileKind.AUDIO -> add(OpenMode.AUDIO)
+            com.suibian.sunfile.data.FileKind.VIDEO -> add(OpenMode.VIDEO)
+            else -> Unit
+        }
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
         add(OpenMode.EXTERNAL)
     }
@@ -529,6 +545,8 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.TEXT -> Icons.Outlined.TextFields
     OpenMode.HEX -> Icons.Outlined.Terminal
     OpenMode.IMAGE -> Icons.Outlined.Image
+    OpenMode.AUDIO -> Icons.Outlined.MusicNote
+    OpenMode.VIDEO -> Icons.Outlined.Movie
     OpenMode.ARCHIVE -> Icons.Outlined.Archive
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
@@ -537,6 +555,8 @@ private fun modeHint(mode: OpenMode) = when (mode) {
     OpenMode.TEXT -> "语法高亮、补全，可直接编辑保存"
     OpenMode.HEX -> "按字节查看任意大小的文件"
     OpenMode.IMAGE -> "内置缩放查看大图"
+    OpenMode.AUDIO -> "内置播放器，可拖动进度"
+    OpenMode.VIDEO -> "内置全屏播放，可暂停与拖动"
     OpenMode.ARCHIVE -> "浏览 zip/apk 内部文件并解压"
     OpenMode.EXTERNAL -> "交给系统中已安装的应用"
 }

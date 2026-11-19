@@ -86,7 +86,8 @@ object Syntax {
         tag = Color(0xFF7DCFFF)
     )
 
-    private const val HIGHLIGHT_LIMIT = 90_000
+    // 超过这个长度不再上色：整段文本重排已经很重，颜色是第二优先级
+    private const val HIGHLIGHT_LIMIT = 120_000
 
     private val kotlin = setOf(
         "package", "import", "class", "interface", "object", "fun", "val", "var", "vararg", "typealias",
@@ -385,16 +386,34 @@ object Syntax {
         return builder.toAnnotatedString()
     }
 
-    /** 语法高亮的 VisualTransformation */
+    /**
+     * 语法高亮的 VisualTransformation。
+     * 缓存上一次的结果：滚动、弹出菜单等引起的重组不会重复着色。
+     */
     class CodeHighlightTransformation(
         private val lang: Lang,
         private val colors: CodeColors = DarkCode
     ) : androidx.compose.ui.text.input.VisualTransformation {
-        override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText =
-            androidx.compose.ui.text.input.TransformedText(
-                highlight(text.text, lang, colors),
+        private var lastText: String? = null
+        private var lastResult: AnnotatedString? = null
+
+        override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+            val raw = text.text
+            val cached = lastResult
+            if (cached != null && lastText === raw) {
+                return androidx.compose.ui.text.input.TransformedText(
+                    cached,
+                    androidx.compose.ui.text.input.OffsetMapping.Identity
+                )
+            }
+            val out = highlight(raw, lang, colors)
+            lastText = raw
+            lastResult = out
+            return androidx.compose.ui.text.input.TransformedText(
+                out,
                 androidx.compose.ui.text.input.OffsetMapping.Identity
             )
+        }
     }
 
     /** 供补全引擎取得当前语言的关键字表 */

@@ -25,42 +25,39 @@ data class DirListing(
     val message: String? = null
 )
 
-/** 文本读取结果。超大文件走分页模式，每一页都可读可写，不再截断丢弃内容 */
+/** 文本读取结果：编辑器首屏的内容，超出部分按需继续追加 */
 data class TextContent(
     val text: String,
     val encoding: String,
     val truncated: Boolean,
     val totalBytes: Long,
     val editable: Boolean,
-    /** true 表示内容只是某一页，需要按页翻动 */
-    val paged: Boolean = false,
-    val pageOffset: Long = 0,
-    val pageBytes: Int = 0
+    val loadedBytes: Long = 0,
+    val partial: Boolean = false,
+    val bom: Boolean = false
 )
 
-/** 分页读取的一页文本 */
-data class TextPage(
+/** 逐段读取的一段文本：从文件偏移 from 到 to，拼起来就是完整原文 */
+data class TextWindow(
     val text: String,
     val encoding: String,
-    val offset: Long,
-    val bytes: Int,
-    val pageIndex: Int,
-    val pageCount: Int,
+    val from: Long,
+    val to: Long,
     val totalBytes: Long,
-    /** 整文件是否还有下一页可继续拼接 */
-    val lastPage: Boolean
+    val partial: Boolean,
+    val bom: Boolean = false
 )
 
 /** 文件系统的读写、遍历与增删改 */
 object FileRepo {
 
     /**
-     * 一次性载入输入框的文本上限。超过此值改用分页，
+     * 一次性载入输入框的文本上限。超过此值改用逐段加载，
      * 因为 Compose 对超大文本的排版开销会直接拖垮滚动，而不是内存不够。
      */
-    const val TEXT_EDIT_LIMIT = 1L * 1024 * 1024
-    /** 分页大小：一页约 5–6 千行，滚动与编辑都跟手 */
-    const val PAGE_BYTES = 256 * 1024
+    const val TEXT_EDIT_LIMIT = 8L * 1024 * 1024
+    /** 编辑器首屏与每次追加的段大小 */
+    const val EDITOR_WINDOW = 200 * 1024
     /** 旧常量保留，供历史代码引用 */
     const val TEXT_PREVIEW_BYTES = TEXT_EDIT_LIMIT
     const val MAX_TEXT_BYTES = TEXT_EDIT_LIMIT
@@ -379,71 +376,26 @@ object FileRepo {
     }
 
     fun readText(file: File): String {
-        if (file.length() > TEXT_EDIT_LIMIT) {
-            throw IOException("文件超过 ${TEXT_EDIT_LIMIT / 1024 / 1024}MB，请使用分页编辑")
-        }
+        if (file.length() > TEXT_EDIT_LIMIT) throw IOException("文件过大")
         return decodeText(file.readBytes(), file.length().toInt()).first
     }
 
     /**
-     * 读取文本。
-     *
-     * ≤ 48MB：完整载入内存，直接编辑、保存，内容一行不少。
-     * > 48MB：切成分页，返回第一页（1MB），每页都可编辑并写回原文件，
-     *         通过 [readPage] / [writePage] 翻页，不再出现"只显示前 256KB"。
+     * 打开文本：只取首屏一段（默认 200KB），后续内容在用户向下滑动时继续追加。
+     * 小文件一次读完，行为与普通编辑器完全一致。
      */
     fun readTextSmart(file: File): TextContent {
-        val size = file.length()
-        if (size <= TEXT_EDIT_LIMIT) {
-            return runCatching {
-                val (text, enc) = readAllText(file)
-                TextContent(text, enc, false, size, true)
-            }.getOrElse { e ->
-                // 内存不足等异常：降级到分页，保证仍能看到完整内容
-                val page = readPage(file, 0)
-                TextContent(
-                    text = page.text,
-                    encoding = page.encoding,
-                    truncated = false,
-                    totalBytes = size,
-                    editable = true,
-                    paged = true,
-                    pageOffset = page.offset,
-                    pageBytes = page.bytes
-                )
-            }
-        }
-        val page = readPage(file, 0)
+        val w = readWindow(file, 0L, EDITOR_WINDOW)
         return TextContent(
-            text = page.text,
-            encoding = page.encoding,
-            truncated = false,
-            totalBytes = size,
+            text = w.text,
+            encoding = w.encoding,
+            truncated = w.partial,
+            totalBytes = w.totalBytes,
             editable = true,
-            paged = true,
-            pageOffset = page.offset,
-            pageBytes = page.bytes
+            loadedBytes = w.to,
+            partial = w.partial,
+            bom = w.bom
         )
-    }
-
-    /** 流式全量读取，避免 readBytes 一次性申请双倍内存 */
-    private fun readAllText(file: File): Pair<String, String> {
-        val charset = detectCharset(file)
-        val text = file.inputStream().use { input ->
-            val reader = charset.newDecoder()
-                .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
-                .let { java.io.InputStreamReader(input, it) }
-            val sb = StringBuilder((file.length()).coerceAtMost(8L * 1024 * 1024).toInt())
-            val buf = CharArray(64 * 1024)
-            while (true) {
-                val n = reader.read(buf)
-                if (n <= 0) break
-                sb.append(buf, 0, n)
-            }
-            sb.toString()
-        }
-        return text to charset.name()
     }
 
     /** 读取文件头判断编码；无 BOM 且非 UTF-8 时按 GBK 处理 */
@@ -467,35 +419,41 @@ object FileRepo {
     }
 
     /**
-     * 分页读取。
-     *
-     * 关键点：页首与页尾都对齐到「字符首字节」，相邻两页严丝合缝，
-     * 既不重复也不丢字，把所有页顺序拼起来就是原文。
+     * 逐段读取一段文本：起点对齐到字符首字节，终点优先落在行尾，
+     * 因此相邻两段拼起来既不重复也不丢字，且每段都以完整行结束。
      */
-    fun readPage(file: File, pageIndex: Int, pageBytes: Int = PAGE_BYTES): TextPage {
+    fun readWindow(file: File, from: Long, maxBytes: Int = EDITOR_WINDOW): TextWindow {
         val size = file.length()
-        val per = pageBytes.toLong().coerceAtLeast(4096L)
-        val pageCount = ((size + per - 1) / per).toInt().coerceAtLeast(1)
-        val index = pageIndex.coerceIn(0, pageCount - 1)
-
-        val rawStart = index * per
-        val rawEnd = minOf((index + 1) * per, size)
-        val start = if (rawStart == 0L) 0L else boundaryBack(file, rawStart)
-        val end = if (rawEnd >= size) size else boundaryBack(file, rawEnd)
-        val len = (end - start).toInt().coerceAtLeast(0)
-
-        val bytes = readChunk(file, start, len)
+        val start = if (from <= 0L) 0L else boundaryBack(file, from)
+        if (start >= size) {
+            return TextWindow("", "UTF-8", start, start, size, false, false)
+        }
+        val rawEnd = minOf(start + maxBytes.toLong().coerceAtLeast(4096L), size)
+        var end = rawEnd
+        if (rawEnd < size) {
+            val chunk = readChunk(file, start, (rawEnd - start).toInt())
+            var nl = -1
+            for (i in chunk.indices.reversed()) {
+                if (chunk[i] == '\n'.code.toByte()) { nl = i; break }
+            }
+            // 只在后半段找换行，避免切得太碎
+            end = if (nl >= chunk.size / 3) start + nl + 1 else boundaryBack(file, rawEnd)
+        }
+        val bytes = readChunk(file, start, (end - start).toInt().coerceAtLeast(0))
         val charset = detectCharset(file)
-        val text = String(bytes, 0, bytes.size, charset)
-        return TextPage(
+        val hasBom = start == 0L && bytes.size >= 3 &&
+            bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+        val offset = if (hasBom) 3 else 0
+        var text = String(bytes, offset, bytes.size - offset, charset)
+        if (start == 0L && text.startsWith('\uFEFF')) text = text.substring(1)
+        return TextWindow(
             text = text,
             encoding = charset.name(),
-            offset = start,
-            bytes = bytes.size,
-            pageIndex = index,
-            pageCount = pageCount,
+            from = start,
+            to = end,
             totalBytes = size,
-            lastPage = index >= pageCount - 1
+            partial = end < size,
+            bom = hasBom
         )
     }
 
@@ -510,11 +468,35 @@ object FileRepo {
         return if (i < 0) pos else pos - back + (i + 1)
     }
 
-    /** 分页保存：把某一页的新内容写回原偏移，长度变化时重排后续内容 */
-    fun writePage(file: File, page: TextPage, text: String): Boolean = runCatching {
-        val charset = runCatching { Charset.forName(page.encoding) }.getOrDefault(Charsets.UTF_8)
-        val bytes = text.toByteArray(charset)
-        replaceRange(file, page.offset, page.bytes.toLong(), bytes)
+    /**
+     * 逐段编辑后的保存：写入新的前段，再把尚未加载的尾部原样接到后面。
+     * 这样即使文件有几百 MB，也只重写屏幕上看得到的部分。
+     */
+    fun writeHeadAndTail(
+        file: File,
+        head: ByteArray,
+        tailFrom: Long,
+        bom: Boolean = false
+    ): Boolean = runCatching {
+        val tmp = File(file.parentFile, ".${file.name}.suntmp")
+        val executable = runCatching { file.canExecute() }.getOrDefault(false)
+        FileInputStream(file).use { input ->
+            FileOutputStream(tmp).use { out ->
+                if (bom) out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+                out.write(head)
+                if (tailFrom < file.length()) {
+                    input.channel.position(tailFrom)
+                    input.copyTo(out, 128 * 1024)
+                }
+                out.flush()
+                out.fd.sync()
+            }
+        }
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
+        }
+        runCatching { if (executable) file.setExecutable(true) }
         true
     }.getOrDefault(false)
 

@@ -1,10 +1,11 @@
 package com.suibian.sunfile.ui
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -52,7 +54,6 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.WrapText
-import androidx.compose.material.icons.outlined.Info
 import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,18 +66,25 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.key
@@ -85,15 +93,15 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -104,7 +112,10 @@ import com.suibian.sunfile.data.Revision
 import com.suibian.sunfile.ui.components.CircularReveal
 import com.suibian.sunfile.ui.components.DrawCheck
 import com.suibian.sunfile.ui.editor.CodeColors
+import com.suibian.sunfile.ui.editor.CompletionEngine
 import com.suibian.sunfile.ui.editor.CompletionItem
+import com.suibian.sunfile.ui.editor.CompletionKind
+import com.suibian.sunfile.ui.editor.CompletionResult
 import com.suibian.sunfile.ui.editor.Syntax
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.NumberStyle
@@ -121,6 +132,9 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+/** 首次打开后，滚动到底部会自动继续追加的字节上限；再往后改为手动点击加载 */
+private const val AUTO_GROW_LIMIT = 1_200_000L
 
 @Composable
 fun EditorOverlay(
@@ -143,11 +157,17 @@ fun EditorOverlay(
     var visible by remember { mutableStateOf(false) }
     val palette = SunColors
     val codeColors = remember(palette) { CodeColors.of(palette) }
+
+    // 文本由界面持有：输入时只重排这一份，不经过 ViewModel，避免整页重组
     var value by remember(file) { mutableStateOf(TextFieldValue("")) }
     var fontSize by remember(file) { mutableIntStateOf(prefs.editorFontSize) }
-    val liveFontSize by androidx.compose.runtime.rememberUpdatedState(fontSize)
+    val liveFontSize by rememberUpdatedState(fontSize)
+    var zoomPreview by remember { mutableFloatStateOf(1f) }
     var wrap by remember(file) { mutableStateOf(prefs.editorWrap) }
     var lineNumbers by remember(file) { mutableStateOf(prefs.editorLineNumbers) }
+    var totalLines by remember(file) { mutableIntStateOf(1) }
+    var caretLine by remember { mutableIntStateOf(1) }
+    var caretColumn by remember { mutableIntStateOf(1) }
     var showFind by remember { mutableStateOf(false) }
     var replaceOpen by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
@@ -158,7 +178,7 @@ fun EditorOverlay(
     var showHistory by remember { mutableStateOf(false) }
     var exitConfirm by remember { mutableStateOf(false) }
     var burstKey by remember { mutableIntStateOf(0) }
-    var completion by remember { mutableStateOf<com.suibian.sunfile.ui.editor.CompletionResult?>(null) }
+    var completion by remember { mutableStateOf<CompletionResult?>(null) }
     var completionIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(file) {
@@ -166,28 +186,52 @@ fun EditorOverlay(
         vm.open(file)
     }
 
+    // 外部替换（打开、撤销、恢复历史）：只在内容确实不同的时候覆盖输入框
     LaunchedEffect(state.syncToken) {
-        if (!state.loading && state.file != null && state.syncToken > 0) {
-            if (initialLine > 1) {
-                var index = 0
-                var line = 1
-                while (line < initialLine && index < state.text.length) {
-                    if (state.text[index] == '\n') line++
-                    index++
-                }
-                value = TextFieldValue(state.text, TextRange(index.coerceAtMost(state.text.length)))
-            } else {
-                value = TextFieldValue(state.text, TextRange(0))
-            }
+        if (state.loading || state.file == null || state.syncToken <= 0) return@LaunchedEffect
+        if (state.text == value.text) return@LaunchedEffect
+        val target = if (state.syncToken == 1 && initialLine > 1) {
+            offsetOfLine(state.text, initialLine)
+        } else {
+            value.selection.start.coerceIn(0, state.text.length)
         }
+        value = TextFieldValue(state.text, TextRange(target))
+        totalLines = state.lineCount
     }
 
-    val matches = remember(state.text, findQuery) {
+    // 行数是重活，等打字停下来再在后台算，绝不放在每次输入上
+    LaunchedEffect(value.text) {
+        delay(180)
+        val snapshot = value.text
+        val lines = withContext(Dispatchers.Default) {
+            var n = 1
+            for (c in snapshot) if (c == '\n') n++
+            n
+        }
+        totalLines = lines
+        val caret = value.selection.start.coerceIn(0, snapshot.length)
+        var l = 1
+        var lineStart = 0
+        for (i in 0 until caret) {
+            if (snapshot[i] == '\n') { l++; lineStart = i + 1 }
+        }
+        caretLine = l
+        caretColumn = caret - lineStart + 1
+    }
+
+    // 输入停手后再同步给 ViewModel，保存时以界面文本为准
+    LaunchedEffect(value.text) {
+        if (state.loading) return@LaunchedEffect
+        delay(200)
+        vm.updateText(value.text)
+    }
+
+    val matches = remember(value.text, findQuery) {
         if (findQuery.isEmpty()) emptyList() else buildList {
-            var i = state.text.indexOf(findQuery, 0, ignoreCase = true)
-            while (i >= 0 && size < 2000) {
+            var i = value.text.indexOf(findQuery, 0, ignoreCase = true)
+            while (i >= 0 && size < 500) {
                 add(i)
-                i = state.text.indexOf(findQuery, i + 1, ignoreCase = true)
+                i = value.text.indexOf(findQuery, i + 1, ignoreCase = true)
             }
         }
     }
@@ -201,7 +245,7 @@ fun EditorOverlay(
         val safe = ((index % matches.size) + matches.size) % matches.size
         findIndex = safe
         val start = matches[safe]
-        value = value.copy(selection = TextRange(start, (start + findQuery.length).coerceAtMost(state.text.length)))
+        value = value.copy(selection = TextRange(start, (start + findQuery.length).coerceAtMost(value.text.length)))
     }
 
     fun refreshSuggestions(tv: TextFieldValue) {
@@ -209,23 +253,25 @@ fun EditorOverlay(
             completion = null
             return
         }
-        completion = com.suibian.sunfile.ui.editor.CompletionEngine
-            .suggest(state.lang, tv.text, tv.selection.start, 8)
-        completionIndex = 0
+        val next = CompletionEngine.suggest(state.lang, tv.text, tv.selection.start, 6)
+        if (next?.typed != completion?.typed || next?.replaceEnd != completion?.replaceEnd) {
+            completionIndex = 0
+        }
+        completion = next
     }
 
-    fun applyCompletion(item: com.suibian.sunfile.ui.editor.CompletionItem) {
+    fun applyCompletion(item: CompletionItem) {
         val c = completion ?: return
         val start = c.replaceStart.coerceIn(0, value.text.length)
         val end = c.replaceEnd.coerceIn(start, value.text.length)
         val newText = value.text.substring(0, start) + item.insert + value.text.substring(end)
         val caret = (start + item.insert.length - item.caretBack).coerceIn(0, newText.length)
         value = TextFieldValue(newText, TextRange(caret))
-        vm.updateText(newText)
         completion = null
+        vm.updateText(newText)
     }
 
-    // 外接键盘：↑↓ 选择、Tab 接受、Esc 关闭（与 VS Code 一致的键位）
+    // 外接键盘：↑↓ 选择、Tab/Enter 接受、Esc 关闭
     fun onKeyEvent(e: KeyEvent): Boolean {
         val c = completion ?: return false
         return when (e.key) {
@@ -252,12 +298,12 @@ fun EditorOverlay(
     }
 
     fun close() {
-        if (state.dirty && !state.readOnly) {
+        if (value.text != state.baseline) {
             exitConfirm = true
         } else {
             scope.launch {
                 visible = false
-                delay(220)
+                delay(200)
                 vm.reset()
                 onClose()
             }
@@ -267,18 +313,25 @@ fun EditorOverlay(
     BackHandler {
         when {
             showFind -> showFind = false
+            completion != null -> completion = null
             menuOpen -> menuOpen = false
             else -> close()
         }
     }
 
     val lineHeight = (fontSize * 1.55f).sp
-    val textStyle = TextStyle(
-        color = SunColors.TextPrimary,
-        fontSize = fontSize.sp,
-        lineHeight = lineHeight,
-        fontFamily = FontFamily.Monospace
-    )
+    val textColor = SunColors.TextPrimary
+    val textStyle = remember(fontSize, textColor) {
+        TextStyle(
+            color = textColor,
+            fontSize = fontSize.sp,
+            lineHeight = lineHeight,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+    val highlight = remember(state.lang, codeColors) {
+        Syntax.CodeHighlightTransformation(state.lang, codeColors)
+    }
 
     CircularReveal(origin = origin, visible = visible, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -312,14 +365,13 @@ fun EditorOverlay(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (state.dirty) {
+                        if (value.text != state.baseline) {
                             Spacer(Modifier.width(5.dp))
                             Box(Modifier.size(5.dp).clip(CircleShape).background(SunColors.Warning))
                         }
                     }
                     Text(
-                        compactPath((state.file ?: file).parent ?: "") +
-                            "  ·  ${state.lang.label}" + if (state.readOnly) " · 只读" else "",
+                        (state.file ?: file).parent ?: "",
                         color = SunColors.TextTertiary,
                         fontSize = 8.5.sp,
                         fontFamily = FontFamily.Monospace,
@@ -331,13 +383,18 @@ fun EditorOverlay(
                 EditorIcon(Icons.Default.Redo, "重做", enabled = state.canRedo) { vm.redo() }
                 SaveButton(
                     saving = state.saving,
-                    enabled = !state.readOnly,
+                    enabled = true,
                     burstKey = burstKey,
-                    onSave = { vm.save { ok -> if (ok) burstKey++ } }
+                    onSave = { vm.save(value.text) { ok -> if (ok) burstKey++ } }
                 )
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(38.dp)) {
-                        Icon(Icons.Default.MoreVert, "更多", tint = SunColors.TextSecondary, modifier = Modifier.size(19.dp))
+                        Icon(
+                            Icons.Default.MoreVert,
+                            "更多",
+                            tint = SunColors.TextSecondary,
+                            modifier = Modifier.size(19.dp)
+                        )
                     }
                     DropdownMenu(
                         expanded = menuOpen,
@@ -356,30 +413,24 @@ fun EditorOverlay(
                             menuOpen = false
                             gotoOpen = true
                         }
-                        EditorMenu(
-                            if (wrap) "关闭自动换行" else "开启自动换行",
-                            Icons.Default.WrapText
-                        ) {
+                        EditorMenu(if (wrap) "关闭自动换行" else "开启自动换行", Icons.Default.WrapText) {
                             menuOpen = false
                             wrap = !wrap
                             onEditorPrefs(null, wrap, null, null)
                         }
-                        EditorMenu(
-                            if (lineNumbers) "隐藏行号" else "显示行号",
-                            Icons.Default.FormatLineSpacing
-                        ) {
+                        EditorMenu(if (lineNumbers) "隐藏行号" else "显示行号", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
                             lineNumbers = !lineNumbers
                             onEditorPrefs(null, null, lineNumbers, null)
                         }
                         EditorMenu("字号 +", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
-                            fontSize = (fontSize + 1).coerceAtMost(22)
+                            fontSize = (fontSize + 1).coerceAtMost(28)
                             onEditorPrefs(fontSize, null, null, null)
                         }
                         EditorMenu("字号 −", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
-                            fontSize = (fontSize - 1).coerceAtLeast(10)
+                            fontSize = (fontSize - 1).coerceAtLeast(9)
                             onEditorPrefs(fontSize, null, null, null)
                         }
                         EditorMenu("历史版本", Icons.Default.History) {
@@ -403,7 +454,11 @@ fun EditorOverlay(
             }
 
             // ---------------- 查找栏 ----------------
-            AnimatedVisibility(visible = showFind, enter = fadeIn(tween(Motion.Fast)), exit = fadeOut(tween(Motion.Fast))) {
+            AnimatedVisibility(
+                visible = showFind,
+                enter = fadeIn(tween(Motion.Fast)),
+                exit = fadeOut(tween(Motion.Fast))
+            ) {
                 Row(
                     Modifier.fillMaxWidth().background(SunColors.Surface2).padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -429,48 +484,31 @@ fun EditorOverlay(
                         onClick = { if (matches.isNotEmpty()) jumpTo(findIndex - 1) },
                         modifier = Modifier.size(34.dp)
                     ) {
-                        Icon(Icons.Default.KeyboardArrowUp, "上一个", tint = SunColors.TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            "上一个",
+                            tint = SunColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                     IconButton(
                         onClick = { if (matches.isNotEmpty()) jumpTo(findIndex + 1) },
                         modifier = Modifier.size(34.dp)
                     ) {
-                        Icon(Icons.Default.KeyboardArrowDown, "下一个", tint = SunColors.TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            "下一个",
+                            tint = SunColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                     IconButton(onClick = { showFind = false }, modifier = Modifier.size(34.dp)) {
-                        Icon(Icons.Default.Close, "关闭", tint = SunColors.TextTertiary, modifier = Modifier.size(17.dp))
-                    }
-                }
-            }
-
-            // ---------------- 分页导航（超大文件） ----------------
-            if (state.paged) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(SunColors.Surface2)
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${Fmt.size(state.pageOffset)} – ${Fmt.size(state.pageOffset + state.pageBytes)}",
-                        color = SunColors.TextTertiary,
-                        fontSize = 9.sp,
-                        style = NumberStyle,
-                        modifier = Modifier.weight(1f)
-                    )
-                    PageStep(Icons.Default.KeyboardArrowUp, enabled = state.hasPrevPage) {
-                        vm.prevPage { value = TextFieldValue(vm.state.value.text, TextRange(0)) }
-                    }
-                    Text(
-                        "${state.pageIndex + 1} / ${state.pageCount}",
-                        color = SunColors.TextSecondary,
-                        fontSize = 9.5.sp,
-                        style = NumberStyle,
-                        modifier = Modifier.padding(horizontal = 6.dp)
-                    )
-                    PageStep(Icons.Default.KeyboardArrowDown, enabled = state.hasNextPage) {
-                        vm.nextPage { value = TextFieldValue(vm.state.value.text, TextRange(0)) }
+                        Icon(
+                            Icons.Default.Close,
+                            "关闭",
+                            tint = SunColors.TextTertiary,
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
             }
@@ -480,35 +518,40 @@ fun EditorOverlay(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .clipToBounds()
                     .background(SunColors.Bg)
-                    // 双指捏合缩放字号（单指仍交给文本选择，互不抢手势）
+                    // 双指捏合：先按图层缩放预览，松手才提交字号，避免每帧整段重排
                     .pointerInput(Unit) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var acc = 1f
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 if (event.changes.size >= 2) {
-                                    val zoom = event.calculateZoom()
-                                    if (zoom != 1f && zoom > 0f) {
-                                        val next = (liveFontSize * zoom).roundToInt().coerceIn(8, 40)
-                                        if (next != fontSize) {
-                                            fontSize = next
-                                            onEditorPrefs(next, null, null, null)
-                                        }
+                                    val z = event.calculateZoom()
+                                    if (z != 1f && z > 0f) {
+                                        acc = (acc * z).coerceIn(0.25f, 4f)
+                                        zoomPreview = acc
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
                                 if (event.changes.none { it.pressed }) break
+                            }
+                            val next = (liveFontSize * acc).roundToInt().coerceIn(9, 28)
+                            zoomPreview = 1f
+                            if (next != fontSize) {
+                                fontSize = next
+                                onEditorPrefs(next, null, null, null)
                             }
                         }
                     }
             ) {
                 val density = LocalDensity.current
                 val lineHpx = with(density) { lineHeight.toPx() }
-                val viewportPx = with(density) { maxHeight.toPx() }
-                val viewportDp = maxHeight
                 val vScroll = rememberScrollState()
                 val hScroll = rememberScrollState()
+                val topPad = 8.dp
+                val minFieldHeight = (maxHeight - topPad * 2).coerceAtLeast(40.dp)
 
                 when {
                     state.loading -> CircularProgressIndicator(
@@ -526,119 +569,136 @@ fun EditorOverlay(
                         Text(state.error ?: "", color = SunColors.TextTertiary, fontSize = 10.5.sp)
                     }
 
-                    wrap -> BasicTextField(
-                        value = value,
-                        onValueChange = { nv ->
-                            val smart = if (state.readOnly) nv else Syntax.smartEdit(nv, value)
-                            value = smart
-                            vm.updateText(smart.text)
-                            refreshSuggestions(smart)
-                        },
-                        textStyle = textStyle,
-                        cursorBrush = SolidColor(SunColors.Accent),
-                        visualTransformation = remember(state.lang, codeColors) { Syntax.CodeHighlightTransformation(state.lang, codeColors) },
-                        readOnly = state.readOnly,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Default),
-                        modifier = Modifier
+                    else -> Row(
+                        Modifier
                             .fillMaxSize()
-                            .verticalScroll(vScroll)
-                            .onPreviewKeyEvent { onKeyEvent(it) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                    )
+                            .graphicsLayer {
+                                scaleX = zoomPreview
+                                scaleY = zoomPreview
+                            }
+                    ) {
+                        // 行号：只画可见的那几十行，滚动时按偏移重绘
+                        if (lineNumbers && !wrap) {
+                            LineGutter(
+                                scrollState = vScroll,
+                                lineHeightPx = lineHpx,
+                                topPaddingPx = with(density) { topPad.toPx() },
+                                totalLines = totalLines,
+                                activeLine = caretLine - 1,
+                                modifier = Modifier.width(42.dp).fillMaxHeight()
+                            )
+                        }
+                        BasicTextField(
+                            value = value,
+                            onValueChange = { nv ->
+                                val smart = Syntax.smartEdit(nv, value)
+                                value = smart
+                                refreshSuggestions(smart)
+                            },
+                            textStyle = textStyle,
+                            cursorBrush = SolidColor(SunColors.Accent),
+                            visualTransformation = highlight,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Text,
+                                imeAction = ImeAction.Default
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize()
+                                .heightIn(min = minFieldHeight)
+                                .verticalScroll(vScroll)
+                                .then(if (wrap) Modifier else Modifier.horizontalScroll(hScroll))
+                                .onFocusChanged { if (!it.isFocused) completion = null }
+                                .onPreviewKeyEvent { onKeyEvent(it) }
+                                .padding(horizontal = 10.dp, vertical = topPad)
+                        )
+                    }
+                }
 
-                    else -> Row(Modifier.fillMaxSize().verticalScroll(vScroll)) {
-                        if (lineNumbers && state.lineCount <= 3_000) {
-                            val activeLine = currentLine(value)
-                            Column(
-                                Modifier
-                                    .width(44.dp)
-                                    .background(SunColors.Surface1.copy(alpha = 0.55f))
-                                    .padding(top = 8.dp, bottom = 8.dp)
+                // 补全候选：浮在编辑区底部，不改变文本区高度，避免重复排版
+                val comp = completion
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = comp != null,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    enter = fadeIn(tween(Motion.Fast)) +
+                        androidx.compose.animation.scaleIn(
+                            tween(Motion.Base, easing = Motion.EaseOut),
+                            initialScale = 0.97f
+                        ),
+                    exit = fadeOut(tween(Motion.Fast))
+                ) {
+                    if (comp != null) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(SunShapes.Medium)
+                                .background(SunColors.Surface4)
+                        ) {
+                            comp.items.forEachIndexed { i, item ->
+                                CompletionRow(
+                                    item = item,
+                                    active = i == completionIndex,
+                                    onClick = { applyCompletion(item) }
+                                )
+                            }
+                            CompletionDoc(comp.items.getOrNull(completionIndex.coerceIn(0, comp.items.lastIndex)))
+                        }
+                    }
+                }
+
+                // 滚到接近底部就继续追加下一段
+                LaunchedEffect(state.hasMore, state.loadingMore) {
+                    if (!state.hasMore) return@LaunchedEffect
+                    snapshotFlow { vScroll.value to vScroll.maxValue }
+                        .collect { (v, max) ->
+                            val live = vm.state.value
+                            if (max > 0 && v >= max - lineHpx * 6 && live.hasMore &&
+                                live.loadedBytes < AUTO_GROW_LIMIT && !live.loadingMore
                             ) {
-                                repeat(state.lineCount) { i ->
-                                    Text(
-                                        (i + 1).toString(),
-                                        color = if (i == activeLine) SunColors.Accent else SunColors.TextTertiary.copy(alpha = 0.7f),
-                                        fontSize = 9.sp,
-                                        lineHeight = lineHeight,
-                                        textAlign = TextAlign.End,
-                                        maxLines = 1,
-                                        modifier = Modifier.fillMaxWidth().padding(end = 6.dp)
+                                vm.loadMore { chunk ->
+                                    value = value.copy(
+                                        text = value.text + chunk,
+                                        selection = value.selection
                                     )
                                 }
                             }
                         }
-                        Box(Modifier.horizontalScroll(hScroll)) {
-                            BasicTextField(
-                                value = value,
-                                onValueChange = { nv ->
-                                    val smart = if (state.readOnly) nv else Syntax.smartEdit(nv, value)
-                                    value = smart
-                                    vm.updateText(smart.text)
-                                    refreshSuggestions(smart)
-                                },
-                                textStyle = textStyle,
-                                cursorBrush = SolidColor(SunColors.Accent),
-                                visualTransformation = remember(state.lang, codeColors) { Syntax.CodeHighlightTransformation(state.lang, codeColors) },
-                                readOnly = state.readOnly,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Text,
-                                    imeAction = ImeAction.Default
-                                ),
-                                // 超长单行文本限制最大宽度；最小高度铺满视口，点空白处也能聚焦
-                                modifier = Modifier
-                                    .widthIn(max = 8000.dp)
-                                    .heightIn(min = (viewportDp - 16.dp).coerceAtLeast(40.dp))
-                                    .onPreviewKeyEvent { onKeyEvent(it) }
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-
-                LaunchedEffect(state.pageIndex) {
-                    if (state.paged) {
-                        vScroll.scrollTo(0)
-                        hScroll.scrollTo(0)
-                    }
-                }
-
-                // 光标跟随滚动
-                LaunchedEffect(value.selection.start, wrap, state.syncToken) {
-                    if (!wrap && state.lineCount <= 3_000 && state.text.length < 400_000) {
-                        val line = currentLine(value)
-                        val y = line * lineHpx
-                        if (y < vScroll.value + lineHpx * 2 || y > vScroll.value + viewportPx - lineHpx * 3) {
-                            vScroll.scrollTo((y - viewportPx / 2f).toInt().coerceAtLeast(0))
-                        }
-                    }
                 }
             }
 
-            // ---------------- 补全候选（VS Code 风格浮层） ----------------
-            val comp = completion
-            AnimatedVisibility(
-                visible = comp != null,
-                enter = fadeIn(tween(Motion.Fast)) +
-                    androidx.compose.animation.scaleIn(tween(Motion.Base, easing = Motion.EaseOut), initialScale = 0.96f),
-                exit = fadeOut(tween(Motion.Fast))
+            // ---------------- 继续载入（超过自动追加上限后才出现） ----------------
+            if (state.hasMore && !state.loading &&
+                (state.loadingMore || state.loadedBytes >= AUTO_GROW_LIMIT)
             ) {
-                if (comp != null) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .clip(SunShapes.Medium)
-                            .background(SunColors.Surface4)
-                            .padding(vertical = 4.dp)
-                    ) {
-                        comp.items.forEachIndexed { i, item ->
-                            CompletionRow(
-                                item = item,
-                                active = i == completionIndex,
-                                onClick = { applyCompletion(item) }
-                            )
-                        }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(28.dp)
+                        .background(SunColors.Surface1)
+                        .clickable(enabled = !state.loadingMore) {
+                            vm.loadMore { chunk ->
+                                value = value.copy(text = value.text + chunk, selection = value.selection)
+                            }
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (state.loadingMore) {
+                        CircularProgressIndicator(
+                            Modifier.size(10.dp),
+                            color = SunColors.Accent,
+                            strokeWidth = 1.5.dp
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("载入中…", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                    } else {
+                        Text(
+                            "载入下一段 · 剩 ${Fmt.size(state.totalBytes - state.loadedBytes)}",
+                            color = SunColors.Accent,
+                            fontSize = 9.5.sp
+                        )
                     }
                 }
             }
@@ -650,13 +710,13 @@ fun EditorOverlay(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "行 ${currentLine(value) + 1}, 列 ${currentColumn(value)}  ·  ${state.lineCount} 行  ·  ${state.text.length} 字符",
+                    "$caretLine:$caretColumn   $totalLines 行   ${value.text.length} 字符",
                     color = SunColors.TextTertiary,
                     style = NumberStyle
                 )
                 Text(
-                    state.encoding + if (state.dirty) "  ·  未保存" else "  ·  已保存",
-                    color = if (state.dirty) SunColors.Warning else SunColors.TextTertiary,
+                    state.encoding + if (value.text != state.baseline) "  ·  未保存" else "",
+                    color = if (value.text != state.baseline) SunColors.Warning else SunColors.TextTertiary,
                     fontSize = 9.sp
                 )
             }
@@ -689,8 +749,8 @@ fun EditorOverlay(
             onReplaceAll = { find, replace ->
                 replaceOpen = false
                 if (find.isNotEmpty()) {
-                    val next = state.text.replace(find, replace)
-                    if (next != state.text) {
+                    val next = value.text.replace(find, replace)
+                    if (next != value.text) {
                         vm.replaceText(next)
                         findQuery = find
                         showFind = true
@@ -703,20 +763,15 @@ fun EditorOverlay(
     if (gotoOpen) {
         InputDialog(
             title = "跳转到行",
-            label = "行号（1 - ${state.lineCount}）",
+            label = "行号（1 - $totalLines）",
             initial = "",
             confirmText = "跳转",
             onDismiss = { gotoOpen = false },
             onConfirm = { text ->
                 gotoOpen = false
-                val line = text.toIntOrNull()?.coerceIn(1, state.lineCount) ?: return@InputDialog
-                var index = 0
-                var current = 1
-                while (current < line && index < state.text.length) {
-                    if (state.text[index] == '\n') current++
-                    index++
-                }
-                value = value.copy(selection = TextRange(index.coerceAtMost(state.text.length)))
+                val line = text.toIntOrNull()?.coerceIn(1, totalLines) ?: return@InputDialog
+                val offset = offsetOfLine(value.text, line)
+                value = value.copy(selection = TextRange(offset))
             }
         )
     }
@@ -730,7 +785,7 @@ fun EditorOverlay(
             onDismiss = { saveAsOpen = false },
             onConfirm = { name ->
                 saveAsOpen = false
-                vm.saveAs(name) { ok -> if (ok) burstKey++ }
+                vm.saveAs(name, value.text) { ok -> if (ok) burstKey++ }
             }
         )
     }
@@ -744,12 +799,12 @@ fun EditorOverlay(
             text = { Text("退出后本次修改会丢失，是否先保存？", color = SunColors.TextSecondary, fontSize = 12.sp) },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.save { ok ->
+                    vm.save(value.text) { ok ->
                         if (ok) {
                             exitConfirm = false
                             scope.launch {
                                 visible = false
-                                delay(220)
+                                delay(200)
                                 vm.reset()
                                 onClose()
                             }
@@ -762,7 +817,7 @@ fun EditorOverlay(
                     exitConfirm = false
                     scope.launch {
                         visible = false
-                        delay(220)
+                        delay(200)
                         vm.reset()
                         onClose()
                     }
@@ -772,21 +827,58 @@ fun EditorOverlay(
     }
 }
 
-private fun currentLine(value: TextFieldValue): Int {
-    val caret = value.selection.start.coerceIn(0, value.text.length)
-    var count = 0
+private fun offsetOfLine(text: String, line: Int): Int {
+    if (line <= 1) return 0
+    var current = 1
     var i = 0
-    while (i < caret) {
-        if (value.text[i] == '\n') count++
+    while (i < text.length) {
+        if (text[i] == '\n') {
+            current++
+            if (current == line) return i + 1
+        }
         i++
     }
-    return count
+    return text.length
 }
 
-private fun currentColumn(value: TextFieldValue): Int {
-    val caret = value.selection.start.coerceIn(0, value.text.length)
-    val idx = value.text.lastIndexOf('\n', (caret - 1).coerceAtLeast(0))
-    return if (idx < 0) caret + 1 else caret - idx
+/**
+ * 行号槽：用原生 Canvas 直接绘制可见的几十个数字，
+ * 不生成任何 Composable，滚动再快也不掉帧。
+ */
+@Composable
+private fun LineGutter(
+    scrollState: androidx.compose.foundation.ScrollState,
+    lineHeightPx: Float,
+    topPaddingPx: Float,
+    totalLines: Int,
+    activeLine: Int,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val labelPx = with(density) { 9.sp.toPx() }
+    val normalColor = SunColors.TextTertiary.copy(alpha = 0.55f).toArgb()
+    val activeColor = SunColors.Accent.toArgb()
+    Canvas(modifier) {
+        if (lineHeightPx <= 0f) return@Canvas
+        // 在绘制阶段读取滚动值：不触发重组，只重绘
+        val scroll = scrollState.value
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = labelPx
+            textAlign = Paint.Align.RIGHT
+        }
+        val first = ((scroll - topPaddingPx) / lineHeightPx).toInt().coerceAtLeast(0)
+        val visible = (size.height / lineHeightPx).toInt() + 2
+        val last = min(totalLines - 1, first + visible)
+        val x = size.width - 7.dp.toPx()
+        for (i in first..last) {
+            if (i < 0) continue
+            val y = topPaddingPx + i * lineHeightPx - scroll + lineHeightPx * 0.78f
+            if (y < -lineHeightPx || y > size.height + lineHeightPx) continue
+            paint.color = if (i == activeLine) activeColor else normalColor
+            drawContext.canvas.nativeCanvas.drawText((i + 1).toString(), x, y, paint)
+        }
+    }
 }
 
 @Composable
@@ -890,7 +982,7 @@ private fun HistorySheet(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("修改历史", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Text("$revisionCount 个版本 · 每次保存前自动留档", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                    Text("$revisionCount 个版本", color = SunColors.TextTertiary, fontSize = 9.5.sp)
                 }
                 if (revisions.isNotEmpty()) {
                     TextButton(onClick = onClear) {
@@ -918,7 +1010,7 @@ private fun HistorySheet(
                             Column(Modifier.weight(1f)) {
                                 Text(Fmt.time(rev.time), color = SunColors.TextPrimary, fontSize = 12.sp)
                                 Text(
-                                    "${Fmt.size(rev.size)} · 点击预览",
+                                    Fmt.size(rev.size),
                                     color = SunColors.TextTertiary,
                                     fontSize = 9.5.sp,
                                     style = NumberStyle
@@ -967,7 +1059,6 @@ private fun HistorySheet(
     }
 }
 
-
 @Composable
 private fun ReplaceDialog(
     initialFind: String,
@@ -1009,26 +1100,22 @@ private fun ReplaceDialog(
     )
 }
 
-/** 补全候选行：类型徽标 + 命中字符高亮 + 右侧类型说明 */
+/** 补全候选行：类型徽标 + 命中字符高亮 + 右侧类型 */
 @Composable
 private fun CompletionRow(item: CompletionItem, active: Boolean, onClick: () -> Unit) {
-    val bg by androidx.compose.animation.animateColorAsState(
-        targetValue = if (active) SunColors.AccentSoft else Color.Transparent,
-        animationSpec = tween(Motion.Fast),
-        label = "compBg"
-    )
+    val bg = if (active) SunColors.AccentSoft else Color.Transparent
     val badge = when (item.kind) {
-        com.suibian.sunfile.ui.editor.CompletionKind.KEYWORD -> SunColors.Accent
-        com.suibian.sunfile.ui.editor.CompletionKind.SNIPPET -> SunColors.Success
-        com.suibian.sunfile.ui.editor.CompletionKind.SYMBOL -> SunColors.Folder
-        com.suibian.sunfile.ui.editor.CompletionKind.MEMBER -> SunColors.Accent
-        com.suibian.sunfile.ui.editor.CompletionKind.TYPE -> SunColors.Warning
-        com.suibian.sunfile.ui.editor.CompletionKind.WORD -> SunColors.TextTertiary
+        CompletionKind.KEYWORD -> SunColors.Accent
+        CompletionKind.SNIPPET -> SunColors.Success
+        CompletionKind.SYMBOL -> SunColors.Folder
+        CompletionKind.MEMBER -> SunColors.Accent
+        CompletionKind.TYPE -> SunColors.Warning
+        CompletionKind.WORD -> SunColors.TextTertiary
     }
     Row(
         Modifier
             .fillMaxWidth()
-            .height(32.dp)
+            .height(30.dp)
             .background(bg)
             .clickable { onClick() }
             .padding(horizontal = 10.dp),
@@ -1036,15 +1123,15 @@ private fun CompletionRow(item: CompletionItem, active: Boolean, onClick: () -> 
     ) {
         Box(
             Modifier
-                .size(15.dp)
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                .background(badge.copy(alpha = 0.16f)),
+                .size(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(badge.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 item.kind.tag,
                 color = badge,
-                fontSize = 7.5.sp,
+                fontSize = 7.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Medium
             )
@@ -1055,11 +1142,7 @@ private fun CompletionRow(item: CompletionItem, active: Boolean, onClick: () -> 
                 append(item.label)
                 item.hits.forEach { h ->
                     if (h in item.label.indices) {
-                        addStyle(
-                            SpanStyle(color = SunColors.Accent, fontWeight = FontWeight.SemiBold),
-                            h,
-                            h + 1
-                        )
+                        addStyle(SpanStyle(color = SunColors.Accent, fontWeight = FontWeight.SemiBold), h, h + 1)
                     }
                 }
             },
@@ -1071,27 +1154,34 @@ private fun CompletionRow(item: CompletionItem, active: Boolean, onClick: () -> 
             modifier = Modifier.weight(1f)
         )
         Spacer(Modifier.width(6.dp))
+        Text(item.detail, color = SunColors.TextTertiary, fontSize = 8.5.sp, maxLines = 1)
+    }
+}
+
+/** 选中项的说明卡：一句话讲清它是什么、干什么用 */
+@Composable
+private fun CompletionDoc(item: CompletionItem?) {
+    if (item == null || item.documentation.isEmpty()) return
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SunColors.Surface3)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
         Text(
-            item.detail,
+            item.kind.label + " · " + item.detail,
             color = SunColors.TextTertiary,
             fontSize = 8.5.sp,
             maxLines = 1
         )
-    }
-}
-
-@Composable
-private fun PageStep(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(26.dp)) {
-        Icon(
-            icon,
-            null,
-            tint = if (enabled) SunColors.TextSecondary else SunColors.TextTertiary.copy(alpha = 0.3f),
-            modifier = Modifier.size(16.dp)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            item.documentation,
+            color = SunColors.TextSecondary,
+            fontSize = 10.sp,
+            lineHeight = 14.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

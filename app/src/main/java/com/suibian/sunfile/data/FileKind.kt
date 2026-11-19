@@ -9,6 +9,8 @@ enum class OpenMode(val label: String) {
     TEXT("文本编辑器"),
     HEX("十六进制查看器"),
     IMAGE("图片查看器"),
+    AUDIO("音乐播放器"),
+    VIDEO("视频播放器"),
     ARCHIVE("压缩包浏览器"),
     EXTERNAL("用其他应用打开")
 }
@@ -68,7 +70,9 @@ object FileKinds {
         FileKind.TEXT -> OpenMode.TEXT
         FileKind.IMAGE -> OpenMode.IMAGE
         FileKind.ARCHIVE, FileKind.APK -> OpenMode.ARCHIVE
-        FileKind.PDF, FileKind.OFFICE, FileKind.AUDIO, FileKind.VIDEO -> OpenMode.EXTERNAL
+        FileKind.AUDIO -> OpenMode.AUDIO
+        FileKind.VIDEO -> OpenMode.VIDEO
+        FileKind.PDF, FileKind.OFFICE -> OpenMode.EXTERNAL
         FileKind.BINARY -> null
     }
 }
