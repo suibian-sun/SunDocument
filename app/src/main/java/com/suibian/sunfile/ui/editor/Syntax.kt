@@ -237,6 +237,82 @@ object Syntax {
         }
     }
 
+    /** Markdown 单独走一遍按行扫描：标题、引用、列表、行内代码、链接都有颜色 */
+    private fun highlightMarkdown(text: String, colors: CodeColors): AnnotatedString {
+        val b = AnnotatedString.Builder(text)
+        val n = text.length
+        var lineStart = 0
+        var inFence = false
+        while (lineStart <= n) {
+            var lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) n else it }
+            val line = text.substring(lineStart, lineEnd)
+            when {
+                line.trimStart().startsWith("```") -> {
+                    b.addStyle(SpanStyle(color = colors.string), lineStart, lineEnd)
+                    inFence = !inFence
+                }
+                inFence -> b.addStyle(SpanStyle(color = colors.string), lineStart, lineEnd)
+                line.startsWith("#") -> {
+                    val level = line.takeWhile { it == '#' }.length
+                    if (level in 1..6 && line.length > level && line[level] == ' ') {
+                        b.addStyle(
+                            SpanStyle(color = colors.keyword, fontWeight = FontWeight.SemiBold),
+                            lineStart,
+                            lineEnd
+                        )
+                    }
+                }
+                line.trimStart().startsWith(">") -> {
+                    b.addStyle(
+                        SpanStyle(color = colors.comment, fontStyle = FontStyle.Italic),
+                        lineStart,
+                        lineEnd
+                    )
+                }
+                Regex("^\\s*([-*+]|\\d+\\.)\\s").containsMatchIn(line) -> {
+                    val mark = line.indexOfFirst { it == '-' || it == '*' || it == '+' || it.isDigit() }
+                    if (mark >= 0) b.addStyle(SpanStyle(color = colors.annotation), lineStart + mark, lineStart + mark + 1)
+                }
+            }
+            // 行内标记
+            var i = lineStart
+            while (i < lineEnd) {
+                when {
+                    text[i] == '`' -> {
+                        val close = text.indexOf('`', i + 1)
+                        if (close in (i + 1) until lineEnd) {
+                            b.addStyle(SpanStyle(color = colors.string), i, close + 1)
+                            i = close + 1
+                            continue
+                        }
+                    }
+                    text.startsWith("**", i) -> {
+                        val close = text.indexOf("**", i + 2)
+                        if (close in (i + 2) until lineEnd) {
+                            b.addStyle(SpanStyle(color = colors.tag, fontWeight = FontWeight.Medium), i, close + 2)
+                            i = close + 2
+                            continue
+                        }
+                    }
+                    text[i] == '[' -> {
+                        val cb = text.indexOf(']', i + 1)
+                        val op = if (cb in i + 1 until lineEnd) text.indexOf('(', cb) else -1
+                        val cl = if (op in cb + 1 until lineEnd) text.indexOf(')', op) else -1
+                        if (cl in op + 1..lineEnd) {
+                            b.addStyle(SpanStyle(color = colors.annotation), i, cl + 1)
+                            i = cl + 1
+                            continue
+                        }
+                    }
+                }
+                i++
+            }
+            if (lineEnd >= n) break
+            lineStart = lineEnd + 1
+        }
+        return b.toAnnotatedString()
+    }
+
     private fun specOf(lang: Lang): LangSpec = when (lang) {
         Lang.KOTLIN -> LangSpec(kotlin, "//", "/*", "*/", annotation = true)
         Lang.JAVA -> LangSpec(java, "//", "/*", "*/", annotation = true)
@@ -265,6 +341,7 @@ object Syntax {
 
     fun highlight(text: String, lang: Lang, colors: CodeColors = DarkCode): AnnotatedString {
         if (lang == Lang.PLAIN || text.length > HIGHLIGHT_LIMIT) return AnnotatedString(text)
+        if (lang == Lang.MARKDOWN) return highlightMarkdown(text, colors)
         val spec = specOf(lang)
         val builder = AnnotatedString.Builder(text)
         val n = text.length

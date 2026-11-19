@@ -1,9 +1,13 @@
 package com.suibian.sunfile.ui.components
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,7 +22,6 @@ import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,18 +31,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.suibian.sunfile.data.FileKind
 import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.ui.theme.SunColors
 import java.io.File
-import kotlin.math.roundToInt
 
 /** 其它地方仍按类型取线性图标 */
 fun iconOf(file: File, isDir: Boolean = file.isDirectory): ImageVector {
@@ -68,22 +70,83 @@ private val CODE_EXT = setOf(
 @Composable
 fun tintOf(file: File, isDir: Boolean = file.isDirectory): Color {
     if (isDir) return SunColors.Folder
-    return when (FileKinds.kindOf(file)) {
-        FileKind.IMAGE -> Color(0xFF6FB7E8)
-        FileKind.AUDIO -> Color(0xFFB78BE8)
-        FileKind.VIDEO -> Color(0xFFE08A5F)
-        FileKind.ARCHIVE -> Color(0xFFD9A93F)
-        FileKind.APK -> SunColors.Success
-        FileKind.PDF -> Color(0xFFE5675E)
-        FileKind.OFFICE -> Color(0xFF5B9BD5)
-        FileKind.TEXT -> SunColors.TextSecondary
-        else -> Color(0xFF8A939E)
+    return extColor(FileKinds.extensionOf(file), FileKinds.kindOf(file))
+}
+
+/** 扩展名配色：尽量贴近各家语言/办公软件的识别色，扫一眼就能分清 */
+fun extColor(ext: String, kind: FileKind): Color = when (ext) {
+    "py", "pyw" -> Color(0xFF3E7CB1)
+    "js", "mjs", "cjs", "jsx" -> Color(0xFFB49A00)
+    "ts", "tsx" -> Color(0xFF2F74C0)
+    "java" -> Color(0xFFB54A3C)
+    "kt", "kts" -> Color(0xFF8C6BD6)
+    "html", "htm", "xhtml" -> Color(0xFFD2572F)
+    "css", "scss", "less" -> Color(0xFF2F6BD8)
+    "json", "json5" -> Color(0xFF7C8794)
+    "xml", "plist" -> Color(0xFF7C8FA0)
+    "md", "markdown" -> Color(0xFF6B7680)
+    "sh", "bash", "zsh", "fish" -> Color(0xFF3F8F52)
+    "go" -> Color(0xFF1F93B5)
+    "rs" -> Color(0xFFB07A5A)
+    "c", "h" -> Color(0xFF5A6FBF)
+    "cpp", "cc", "cxx", "hpp", "hxx" -> Color(0xFF4A5FA8)
+    "php" -> Color(0xFF6C63A8)
+    "rb" -> Color(0xFFB3423A)
+    "swift" -> Color(0xFFD2572F)
+    "sql" -> Color(0xFFC08420)
+    "yml", "yaml" -> Color(0xFFA8443C)
+    "gradle", "groovy" -> Color(0xFF3C7FA8)
+    "toml", "ini", "conf", "cfg", "properties" -> Color(0xFF6E7B88)
+    "smali" -> Color(0xFF8A8F98)
+    "lua" -> Color(0xFF4B4B96)
+    "dart" -> Color(0xFF2A8BC0)
+    "vue" -> Color(0xFF3FA37A)
+    "svelte" -> Color(0xFFC6502B)
+    "csv", "tsv" -> Color(0xFF3F8F52)
+    "doc", "docx", "docm", "rtf", "odt", "wps", "pages" -> Color(0xFF2B579A)
+    "xls", "xlsx", "xlsm", "ods", "et", "numbers" -> Color(0xFF217346)
+    "ppt", "pptx", "pptm", "odp", "dps", "key" -> Color(0xFFC4492B)
+    "zip", "jar", "aar", "war", "ear", "whl", "epub", "xapk", "apks" -> Color(0xFFC08A24)
+    "rar" -> Color(0xFF9B5BB5)
+    "7z" -> Color(0xFF3D8B8B)
+    "tar", "gz", "tgz", "bz2", "xz", "zst" -> Color(0xFFA87A3C)
+    "apk" -> Color(0xFF3FB950)
+    "pdf" -> Color(0xFFD34B43)
+    else -> when (kind) {
+        FileKind.IMAGE -> Color(0xFF5AA3D6)
+        FileKind.AUDIO -> Color(0xFF9B78D4)
+        FileKind.VIDEO -> Color(0xFFCE7B4F)
+        FileKind.TEXT -> Color(0xFF7E8895)
+        FileKind.ARCHIVE -> Color(0xFFC08A24)
+        FileKind.OFFICE -> Color(0xFF2B579A)
+        FileKind.APK -> Color(0xFF3FB950)
+        FileKind.PDF -> Color(0xFFD34B43)
+        else -> Color(0xFF75808C)
     }
 }
 
+/** 短标签：太长的扩展名取前 4 位，几个常见别名做归一 */
+private fun labelOf(ext: String): String = when (ext) {
+    "", "?" -> "?"
+    "markdown" -> "MD"
+    "jpeg", "jpe", "jfif" -> "JPG"
+    "tiff" -> "TIF"
+    "tar.gz" -> "TGZ"
+    "tar.bz2" -> "TBZ"
+    "gradle" -> "GRD"
+    "properties" -> "PRP"
+    "docx", "docm" -> "DOC"
+    "xlsx", "xlsm" -> "XLS"
+    "pptx", "pptm" -> "PPT"
+    "yaml" -> "YML"
+    "kotlin" -> "KT"
+    else -> ext.uppercase().take(4)
+}
+
 /**
- * 文件格式图标（对齐 MT 管理器）：
- * 彩色圆角块 + 扩展名，一眼就能分出类型，不依赖文字标签。
+ * 文件图标（对齐 MT 管理器）：
+ * 统一的「纸张」轮廓 + 折角，颜色与标签随扩展名变化；
+ * 图片与视频直接显示首帧，不再只是类型色块。
  */
 @Composable
 fun FileTypeBadge(
@@ -96,36 +159,133 @@ fun FileTypeBadge(
         MtFolderIcon(modifier.size(size), SunColors.Folder)
         return
     }
-    val color = tintOf(file, false)
-    val ext = FileKinds.extensionOf(file)
-    val label = when (ext) {
-        "" -> "?"
-        "jpeg" -> "JPG"
-        "markdown" -> "MD"
-        else -> ext.uppercase().take(4)
+    val kind = FileKinds.kindOfName(file.name)
+    if (kind == FileKind.IMAGE || kind == FileKind.VIDEO) {
+        ThumbBadge(file, kind == FileKind.VIDEO, size, modifier)
+        return
     }
-    val shape = RoundedCornerShape(size * 0.26f)
+    val ext = FileKinds.extensionOf(file)
+    PageBadge(
+        label = labelOf(ext),
+        color = extColor(ext, kind),
+        dotted = ext.isEmpty() || kind == FileKind.TEXT && ext in setOf("txt", "log", "nfo"),
+        modifier = modifier.size(size)
+    )
+}
+
+@Composable
+private fun ThumbBadge(file: File, isVideo: Boolean, size: Dp, modifier: Modifier) {
+    val bmp = rememberThumb(file, isVideo)
+    val shape = RoundedCornerShape(size * 0.18f)
+    val fallback = extColor(FileKinds.extensionOf(file), FileKinds.kindOfName(file.name))
     Box(
-        modifier
-            .size(size)
-            .clip(shape)
-            .background(color.copy(alpha = if (SunColors.dark) 0.18f else 0.13f))
-            .border(1.dp, color.copy(alpha = 0.42f), shape),
+        modifier.size(size).clip(shape).background(fallback.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = label,
-            color = color,
-            fontSize = when (label.length) {
-                1 -> (size.value * 0.44f).sp
-                2 -> (size.value * 0.38f).sp
-                3 -> (size.value * 0.30f).sp
-                else -> (size.value * 0.25f).sp
-            },
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1
-        )
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                if (isVideo) Icons.Outlined.Movie else Icons.Outlined.Image,
+                null,
+                tint = fallback.copy(alpha = 0.85f),
+                modifier = Modifier.size(size * 0.55f)
+            )
+        }
+        if (isVideo) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(size * 0.06f)
+                    .size(size * 0.34f)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(Modifier.size(size * 0.17f)) {
+                    val w = this.size.width
+                    val h = this.size.height
+                    val p = Path().apply {
+                        moveTo(w * 0.2f, 0f)
+                        lineTo(w * 0.95f, h * 0.5f)
+                        lineTo(w * 0.2f, h)
+                        close()
+                    }
+                    drawPath(p, Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** 纸张轮廓 + 折角 + 居中标签（纯 Canvas 绘制，零布局开销） */
+@Composable
+private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Modifier) {
+    val ink = Color.White
+    val foldAlpha = 0.30f
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val left = w * 0.16f
+        val right = w * 0.84f
+        val top = h * 0.07f
+        val bottom = h * 0.93f
+        val fold = (right - left) * 0.34f
+
+        val page = Path().apply {
+            moveTo(left, top + h * 0.04f)
+            lineTo(right - fold, top)
+            lineTo(right, top + fold * 0.86f)
+            lineTo(right, bottom - h * 0.04f)
+            lineTo(left, bottom - h * 0.04f)
+            close()
+        }
+        drawPath(page, color)
+
+        // 折角：用一层半透明白色表示纸被翻起
+        val corner = Path().apply {
+            moveTo(right - fold, top)
+            lineTo(right - fold, top + fold * 0.86f)
+            lineTo(right, top + fold * 0.86f)
+            close()
+        }
+        drawPath(corner, Color.White.copy(alpha = foldAlpha))
+
+        if (dotted) {
+            val stroke = h * 0.055f
+            val lineColor = ink.copy(alpha = 0.82f)
+            for (i in 0..2) {
+                val y = top + h * (0.40f + i * 0.17f)
+                drawLine(
+                    color = lineColor,
+                    start = Offset(left + w * 0.13f, y),
+                    end = Offset(right - w * (if (i == 2) 0.28f else 0.13f), y),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            }
+            return@Canvas
+        }
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            this.color = android.graphics.Color.WHITE
+            textAlign = Paint.Align.CENTER
+            textSize = when (label.length) {
+                1 -> w * 0.40f
+                2 -> w * 0.34f
+                3 -> w * 0.27f
+                else -> w * 0.215f
+            }
+        }
+        // 底部留白比顶部多一点，视觉重心才稳
+        val baseline = bottom - h * 0.14f
+        drawContext.canvas.nativeCanvas.drawText(label, w * 0.5f, baseline, paint)
     }
 }
 
@@ -135,31 +295,41 @@ fun MtFolderIcon(modifier: Modifier = Modifier, tint: Color = SunColors.Folder) 
     Canvas(modifier) {
         val w = size.width
         val h = size.height
-        val body = Path().apply {
-            moveTo(w * 0.06f, h * 0.33f)
-            quadraticBezierTo(w * 0.06f, h * 0.23f, w * 0.16f, h * 0.23f)
-            lineTo(w * 0.37f, h * 0.23f)
-            lineTo(w * 0.46f, h * 0.33f)
-            lineTo(w * 0.84f, h * 0.33f)
-            quadraticBezierTo(w * 0.94f, h * 0.33f, w * 0.94f, h * 0.43f)
-            lineTo(w * 0.94f, h * 0.76f)
-            quadraticBezierTo(w * 0.94f, h * 0.86f, w * 0.84f, h * 0.86f)
-            lineTo(w * 0.16f, h * 0.86f)
-            quadraticBezierTo(w * 0.06f, h * 0.86f, w * 0.06f, h * 0.76f)
+        // 后层：稍微向右下错开，形成厚度
+        val back = Path().apply {
+            moveTo(w * 0.10f, h * 0.36f)
+            quadraticBezierTo(w * 0.10f, h * 0.26f, w * 0.20f, h * 0.26f)
+            lineTo(w * 0.39f, h * 0.26f)
+            lineTo(w * 0.47f, h * 0.36f)
+            lineTo(w * 0.86f, h * 0.36f)
+            quadraticBezierTo(w * 0.94f, h * 0.36f, w * 0.94f, h * 0.44f)
+            lineTo(w * 0.94f, h * 0.80f)
+            quadraticBezierTo(w * 0.94f, h * 0.88f, w * 0.86f, h * 0.88f)
+            lineTo(w * 0.14f, h * 0.88f)
+            quadraticBezierTo(w * 0.06f, h * 0.88f, w * 0.06f, h * 0.80f)
             close()
         }
-        drawPath(body, color = tint.copy(alpha = 0.9f))
-        // 底部一层更深的阴影，让形状有厚度
-        val shade = Path().apply {
-            moveTo(w * 0.06f, h * 0.62f)
-            lineTo(w * 0.94f, h * 0.62f)
-            lineTo(w * 0.94f, h * 0.76f)
-            quadraticBezierTo(w * 0.94f, h * 0.86f, w * 0.84f, h * 0.86f)
-            lineTo(w * 0.16f, h * 0.86f)
-            quadraticBezierTo(w * 0.06f, h * 0.86f, w * 0.06f, h * 0.76f)
+        drawPath(back, color = tint.copy(alpha = 0.72f))
+
+        val front = Path().apply {
+            moveTo(w * 0.06f, h * 0.40f)
+            quadraticBezierTo(w * 0.06f, h * 0.33f, w * 0.15f, h * 0.33f)
+            lineTo(w * 0.38f, h * 0.33f)
+            lineTo(w * 0.45f, h * 0.41f)
+            lineTo(w * 0.85f, h * 0.41f)
+            quadraticBezierTo(w * 0.94f, h * 0.41f, w * 0.94f, h * 0.49f)
+            lineTo(w * 0.94f, h * 0.78f)
+            quadraticBezierTo(w * 0.94f, h * 0.86f, w * 0.85f, h * 0.86f)
+            lineTo(w * 0.14f, h * 0.86f)
+            quadraticBezierTo(w * 0.06f, h * 0.86f, w * 0.06f, h * 0.78f)
             close()
         }
-        drawPath(shade, color = Color.Black.copy(alpha = 0.10f))
+        drawPath(front, color = tint)
+        drawPath(
+            front,
+            color = Color.White.copy(alpha = 0.12f),
+            style = Stroke(width = 0.6.dp.toPx(), join = StrokeJoin.Round)
+        )
     }
 }
 
@@ -203,4 +373,19 @@ fun FileTypeIcon(file: File, isDir: Boolean = file.isDirectory, size: Dp = 20.dp
         tint = tintOf(file, isDir),
         modifier = Modifier.size(size)
     )
+}
+
+/** 大尺寸预览用：方形圆角容器包住同一套图标，用于空状态、详情页 */
+@Composable
+fun FileTypePlate(file: File, isDir: Boolean = false, size: Dp = 56.dp) {
+    val color = tintOf(file, isDir)
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.24f))
+            .background(color.copy(alpha = if (SunColors.dark) 0.14f else 0.10f)),
+        contentAlignment = Alignment.Center
+    ) {
+        FileTypeBadge(file, isDir, size * 0.62f)
+    }
 }

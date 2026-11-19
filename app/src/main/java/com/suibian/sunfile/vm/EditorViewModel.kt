@@ -63,20 +63,28 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private val undoStack = ArrayDeque<Pair<String, Int>>()
     private val redoStack = ArrayDeque<Pair<String, Int>>()
+    private var openToken = 0
     private var lastSnapshotAt = 0L
     private var lastSnapshotLen = 0
     private var undoChars = 0L
 
     private val maxUndoChars = 8L * 1024 * 1024
 
-    fun open(file: File) {
+    fun open(file: File, encoding: String? = null) {
         undoStack.clear()
         redoStack.clear()
         undoChars = 0
         lastSnapshotLen = 0
-        _state.value = EditorState(file = file, loading = true, lang = Syntax.langFor(file.name))
+        _state.value = EditorState(
+            file = file,
+            loading = true,
+            encoding = encoding ?: "UTF-8",
+            lang = Syntax.langFor(file.name)
+        )
         viewModelScope.launch {
-            val content = withContext(Dispatchers.IO) { runCatching { FileRepo.readTextSmart(file) } }
+            val content = withContext(Dispatchers.IO) {
+                runCatching { FileRepo.readTextSmart(file, encoding) }
+            }
             content.onSuccess { c ->
                 _state.value = EditorState(
                     file = file,
@@ -88,7 +96,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     totalBytes = c.totalBytes,
                     encoding = c.encoding,
                     lang = Syntax.langFor(file.name),
-                    syncToken = 1,
+                    syncToken = ++openToken,
                     loadedBytes = c.loadedBytes,
                     partial = c.partial,
                     bom = c.bom,
@@ -338,7 +346,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reload() {
         val f = _state.value.file ?: return
-        open(f)
+        open(f, _state.value.encoding.ifBlank { null })
+    }
+
+    /** 换一种编码重新读入；未保存的改动会被丢弃 */
+    fun setEncoding(name: String) {
+        val f = _state.value.file ?: return
+        if (name == _state.value.encoding) return
+        open(f, name)
+        _toast.tryEmit("已按 $name 重新读取")
     }
 
     fun reset() {

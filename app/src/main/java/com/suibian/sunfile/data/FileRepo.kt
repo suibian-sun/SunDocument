@@ -14,8 +14,10 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.zip.GZIPInputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /** 目录读取结果：目录受系统限制时给出可读提示，而不是直接抛错 */
@@ -384,8 +386,8 @@ object FileRepo {
      * 打开文本：只取首屏一段（默认 200KB），后续内容在用户向下滑动时继续追加。
      * 小文件一次读完，行为与普通编辑器完全一致。
      */
-    fun readTextSmart(file: File): TextContent {
-        val w = readWindow(file, 0L, EDITOR_WINDOW)
+    fun readTextSmart(file: File, encoding: String? = null): TextContent {
+        val w = readWindow(file, 0L, EDITOR_WINDOW, encoding)
         return TextContent(
             text = w.text,
             encoding = w.encoding,
@@ -398,49 +400,73 @@ object FileRepo {
         )
     }
 
-    /** 读取文件头判断编码；无 BOM 且非 UTF-8 时按 GBK 处理 */
+    /** 编辑器里可切换的编码，顺序即菜单顺序 */
+    val ENCODINGS = listOf(
+        "UTF-8", "GB18030", "GBK", "Big5", "Shift_JIS", "EUC-KR",
+        "UTF-16LE", "UTF-16BE", "ISO-8859-1", "windows-1252"
+    )
+
+    fun charsetOf(name: String?): Charset? =
+        name?.let { runCatching { Charset.forName(it) }.getOrNull() }
+
+    /**
+     * 读取文件头判断编码：先看 BOM，再严格试 UTF-8，最后按中文环境兜底 GB18030。
+     * 用户可以在编辑器里手动改成 Big5 / Shift_JIS 等。
+     */
     fun detectCharset(file: File): Charset {
-        val head = ByteArray(8192)
-        val n = file.inputStream().use { it.read(head) }
+        val head = ByteArray(32768)
+        val n = runCatching { file.inputStream().use { it.read(head) } }.getOrDefault(0)
         if (n >= 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() && head[2] == 0xBF.toByte()) {
             return Charsets.UTF_8
         }
         if (n >= 2 && head[0] == 0xFF.toByte() && head[1] == 0xFE.toByte()) return Charsets.UTF_16LE
         if (n >= 2 && head[0] == 0xFE.toByte() && head[1] == 0xFF.toByte()) return Charsets.UTF_16BE
         val utf8 = runCatching {
-            val decoder = Charsets.UTF_8.newDecoder()
+            Charsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
-            decoder.decode(ByteBuffer.wrap(head, 0, n))
+                .decode(ByteBuffer.wrap(head, 0, n))
             true
         }.getOrDefault(false)
         if (utf8) return Charsets.UTF_8
-        return runCatching { Charset.forName("GBK") }.getOrDefault(Charsets.UTF_8)
+        // 非 UTF-8：GB18030 覆盖面最广，适合作为中文默认
+        return charsetOf("GB18030") ?: Charsets.UTF_8
     }
 
     /**
      * 逐段读取一段文本：起点对齐到字符首字节，终点优先落在行尾，
      * 因此相邻两段拼起来既不重复也不丢字，且每段都以完整行结束。
      */
-    fun readWindow(file: File, from: Long, maxBytes: Int = EDITOR_WINDOW): TextWindow {
+    fun readWindow(
+        file: File,
+        from: Long,
+        maxBytes: Int = EDITOR_WINDOW,
+        encoding: String? = null
+    ): TextWindow {
         val size = file.length()
-        val start = if (from <= 0L) 0L else boundaryBack(file, from)
+        val charset = charsetOf(encoding) ?: detectCharset(file)
+        val wide = charset.name().startsWith("UTF-16")
+        // UTF-16 按 2 字节对齐，不能套用 UTF-8 的续字节回退
+        val start = when {
+            from <= 0L -> 0L
+            wide -> from - (from % 2)
+            else -> boundaryBack(file, from)
+        }
         if (start >= size) {
-            return TextWindow("", "UTF-8", start, start, size, false, false)
+            return TextWindow("", charset.name(), start, start, size, false, false)
         }
         val rawEnd = minOf(start + maxBytes.toLong().coerceAtLeast(4096L), size)
         var end = rawEnd
         if (rawEnd < size) {
             val chunk = readChunk(file, start, (rawEnd - start).toInt())
             var nl = -1
+            // UTF-16 的换行是 0A 00 / 00 0A，直接找 0A 也能对齐
             for (i in chunk.indices.reversed()) {
                 if (chunk[i] == '\n'.code.toByte()) { nl = i; break }
             }
-            // 只在后半段找换行，避免切得太碎
-            end = if (nl >= chunk.size / 3) start + nl + 1 else boundaryBack(file, rawEnd)
+            end = if (nl >= chunk.size / 3) start + nl + 1 else if (wide) rawEnd else boundaryBack(file, rawEnd)
         }
         val bytes = readChunk(file, start, (end - start).toInt().coerceAtLeast(0))
-        val charset = detectCharset(file)
         val hasBom = start == 0L && bytes.size >= 3 &&
             bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
         val offset = if (hasBom) 3 else 0
@@ -631,6 +657,266 @@ object FileRepo {
         val compressed: Long,
         val time: Long
     )
+
+    // ---------------- 压缩包：zip / tar / tar.gz / gz ----------------
+
+    enum class ArchiveKind { ZIP, TAR, GZIP, UNSUPPORTED }
+
+    fun archiveKindOf(file: File): ArchiveKind {
+        val ext = FileKinds.extensionOf(file)
+        return when {
+            ext in setOf("zip", "jar", "aar", "war", "ear", "whl", "epub", "apk", "xapk", "apks") -> ArchiveKind.ZIP
+            ext == "tar" -> ArchiveKind.TAR
+            ext in setOf("tar.gz", "tgz") -> ArchiveKind.TAR
+            ext == "gz" -> ArchiveKind.GZIP
+            else -> ArchiveKind.UNSUPPORTED
+        }
+    }
+
+    /** 统一的条目列表：zip 走 ZipFile，tar/gz 走流式解析 */
+    fun archiveEntries(file: File): List<ZipItem> = when (archiveKindOf(file)) {
+        ArchiveKind.ZIP -> zipEntries(file)
+        ArchiveKind.TAR -> tarEntries(openTar(file))
+        ArchiveKind.GZIP -> listOf(
+            ZipItem(
+                name = file.name.removeSuffix(".gz").ifEmpty { "content" },
+                isDir = false,
+                size = file.length(),
+                compressed = file.length(),
+                time = file.lastModified()
+            )
+        )
+        ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式，可用其他应用打开")
+    }
+
+    private fun openTar(file: File): java.io.InputStream {
+        val ext = FileKinds.extensionOf(file)
+        val raw = BufferedInputStream(FileInputStream(file), 128 * 1024)
+        return if (ext in setOf("tar.gz", "tgz") || ext == "gz") GZIPInputStream(raw, 128 * 1024) else raw
+    }
+
+    /** 极简 tar 解析：只读名字、大小、类型，足够列目录与解压 */
+    private fun tarEntries(input: java.io.InputStream): List<ZipItem> {
+        val list = ArrayList<ZipItem>()
+        input.use { stream ->
+            val header = ByteArray(512)
+            var longName: String? = null
+            while (list.size < 50_000) {
+                if (!readFully(stream, header, 512)) break
+                if (header.all { it == 0.toByte() }) break
+                var name = cString(header, 0, 100)
+                val prefix = cString(header, 345, 155)
+                if (prefix.isNotEmpty()) name = "$prefix/$name"
+                val size = cString(header, 124, 12).trim().toLongOrNull(8) ?: 0L
+                val type = header[156].toInt().toChar()
+                val dataBlocks = ((size + 511) / 512)
+
+                when (type) {
+                    'L' -> {
+                        val buf = ByteArray(minOf(size, 4096L).toInt())
+                        readFully(stream, buf, buf.size)
+                        longName = String(buf, Charsets.UTF_8).trimEnd('\u0000')
+                        skipFully(stream, dataBlocks * 512L - buf.size)
+                    }
+                    '5' -> {
+                        list.add(ZipItem(name.trimEnd('/') + "/", true, 0, 0, 0))
+                        skipFully(stream, dataBlocks * 512L)
+                    }
+                    '0', '\u0000', '7' -> {
+                        list.add(ZipItem(longName ?: name, false, size, size, 0))
+                        longName = null
+                        skipFully(stream, dataBlocks * 512L)
+                    }
+                    else -> skipFully(stream, dataBlocks * 512L)
+                }
+            }
+        }
+        return list
+    }
+
+    private fun readFully(input: java.io.InputStream, buf: ByteArray, len: Int): Boolean {
+        var read = 0
+        while (read < len) {
+            val n = input.read(buf, read, len - read)
+            if (n <= 0) return false
+            read += n
+        }
+        return true
+    }
+
+    private fun skipFully(input: java.io.InputStream, count: Long) {
+        var left = count
+        val buf = ByteArray(8192)
+        while (left > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+            if (n <= 0) return
+            left -= n
+        }
+    }
+
+    private fun cString(buf: ByteArray, offset: Int, length: Int): String {
+        var end = offset
+        val max = minOf(offset + length, buf.size)
+        while (end < max && buf[end] != 0.toByte()) end++
+        return String(buf, offset, end - offset, Charsets.UTF_8)
+    }
+
+    fun readArchiveEntry(file: File, name: String, maxBytes: Long = 512 * 1024): ByteArray =
+        when (archiveKindOf(file)) {
+            ArchiveKind.ZIP -> readZipEntry(file, name, maxBytes)
+            ArchiveKind.GZIP -> {
+                GZIPInputStream(BufferedInputStream(FileInputStream(file))).use { input ->
+                    val buf = ByteArray(minOf(maxBytes, 8L * 1024 * 1024).toInt())
+                    var read = 0
+                    while (read < buf.size) {
+                        val n = input.read(buf, read, buf.size - read)
+                        if (n <= 0) break
+                        read += n
+                    }
+                    buf.copyOf(read)
+                }
+            }
+            ArchiveKind.TAR -> {
+                var result: ByteArray? = null
+                val target = name
+                scanTar(file) { entryName, stream, size ->
+                    if (entryName == target) {
+                        val limit = minOf(size, maxBytes).toInt()
+                        val buf = ByteArray(limit.coerceAtLeast(0))
+                        readFully(stream, buf, limit)
+                        result = buf
+                        true
+                    } else false
+                }
+                result ?: throw IOException("压缩包内不存在该文件")
+            }
+            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
+        }
+
+    /** 顺序扫 tar，把命中条目的数据流交给回调；返回 true 表示已找到并停止 */
+    private fun scanTar(file: File, onEntry: (String, java.io.InputStream, Long) -> Boolean) {
+        openTar(file).use { stream ->
+            val header = ByteArray(512)
+            var longName: String? = null
+            while (true) {
+                if (!readFully(stream, header, 512)) return
+                if (header.all { it == 0.toByte() }) return
+                var name = cString(header, 0, 100)
+                val prefix = cString(header, 345, 155)
+                if (prefix.isNotEmpty()) name = "$prefix/$name"
+                val size = cString(header, 124, 12).trim().toLongOrNull(8) ?: 0L
+                val type = header[156].toInt().toChar()
+                val blocks = (size + 511) / 512 * 512
+                if (type == 'L') {
+                    val buf = ByteArray(minOf(size, 4096L).toInt())
+                    readFully(stream, buf, buf.size)
+                    longName = String(buf, Charsets.UTF_8).trimEnd('\u0000')
+                    skipFully(stream, blocks - buf.size)
+                    continue
+                }
+                val real = longName ?: name
+                longName = null
+                if (type != '5' && onEntry(real, stream, size)) return
+                skipFully(stream, blocks)
+            }
+        }
+    }
+
+    fun extractArchiveEntry(archive: File, entryName: String, destDir: File): File =
+        when (archiveKindOf(archive)) {
+            ArchiveKind.ZIP -> extractZipEntry(archive, entryName, destDir)
+            ArchiveKind.GZIP -> {
+                val out = uniqueTarget(destDir, archive.name.removeSuffix(".gz").ifEmpty { "content" })
+                GZIPInputStream(BufferedInputStream(FileInputStream(archive))).use { input ->
+                    BufferedOutputStream(FileOutputStream(out)).use { output -> input.copyTo(output, 128 * 1024) }
+                }
+                out
+            }
+            ArchiveKind.TAR -> {
+                var out: File? = null
+                val target = entryName
+                scanTar(archive) { name, stream, _ ->
+                    if (name == target) {
+                        out = uniqueTarget(destDir, name.substringAfterLast('/').ifEmpty { "entry" })
+                        BufferedOutputStream(FileOutputStream(out!!)).use { output ->
+                            stream.copyTo(output, 128 * 1024)
+                        }
+                        true
+                    } else false
+                }
+                out ?: throw IOException("压缩包内不存在该文件")
+            }
+            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
+        }
+
+    fun extractArchive(archive: File, destDir: File, onProgress: (String, Int, Int) -> Unit): Int =
+        when (archiveKindOf(archive)) {
+            ArchiveKind.ZIP -> extractZip(archive, destDir, onProgress)
+            ArchiveKind.TAR -> extractTarAll(archive, destDir, onProgress)
+            ArchiveKind.GZIP -> {
+                val out = extractArchiveEntry(archive, archive.name, destDir)
+                onProgress(out.name, 1, 1)
+                1
+            }
+            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
+        }
+
+    /** tar 一遍流式解压：每个条目只读一次，不再为每个文件重新扫全包 */
+    private fun extractTarAll(archive: File, destDir: File, onProgress: (String, Int, Int) -> Unit): Int {
+        val destRoot = destDir.canonicalFile
+        var count = 0
+        openTar(archive).use { stream ->
+            val header = ByteArray(512)
+            var longName: String? = null
+            while (true) {
+                if (!readFully(stream, header, 512)) break
+                if (header.all { it == 0.toByte() }) break
+                var name = cString(header, 0, 100)
+                val prefix = cString(header, 345, 155)
+                if (prefix.isNotEmpty()) name = "$prefix/$name"
+                val size = cString(header, 124, 12).trim().toLongOrNull(8) ?: 0L
+                val type = header[156].toInt().toChar()
+                val blocks = (size + 511) / 512 * 512
+
+                if (type == 'L') {
+                    val buf = ByteArray(minOf(size, 4096L).toInt())
+                    readFully(stream, buf, buf.size)
+                    longName = String(buf, Charsets.UTF_8).trimEnd('\u0000')
+                    skipFully(stream, blocks - buf.size)
+                    continue
+                }
+                val real = longName ?: name
+                longName = null
+                val out = File(destDir, real)
+                if (!out.canonicalPath.startsWith(destRoot.path + File.separator) &&
+                    out.canonicalPath != destRoot.path
+                ) {
+                    throw IOException("压缩包包含非法路径：$real")
+                }
+                if (type == '5') {
+                    out.mkdirs()
+                    skipFully(stream, blocks)
+                } else {
+                    out.parentFile?.mkdirs()
+                    FileOutputStream(out).use { o -> copyN(stream, o, size) }
+                    skipFully(stream, blocks - size)
+                    onProgress(real, ++count, 0)
+                }
+            }
+        }
+        return count
+    }
+
+    private fun copyN(input: java.io.InputStream, out: java.io.OutputStream, count: Long) {
+        var left = count
+        val buf = ByteArray(128 * 1024)
+        while (left > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+            if (n <= 0) break
+            out.write(buf, 0, n)
+            left -= n
+        }
+    }
 
     fun zipEntries(file: File): List<ZipItem> = ZipFile(file).use { zf ->
         val list = ArrayList<ZipItem>()

@@ -337,9 +337,13 @@ object CompletionEngine {
 
         val forceContext = typed.isEmpty()
 
-        val index = indexOf(document)
+        // 明显不需要补全的输入直接返回，省掉一次索引与匹配
+        if (typed.length > 40) return null
+        if (typed.isNotEmpty() && typed.all { it.isDigit() }) return null
         // 光标停在空白位置时不主动弹面板，只有 "." "import" "@" 才提示
         if (typed.isEmpty() && context == Ctx.PLAIN) return null
+
+        val index = indexOf(document)
 
         val pool = ArrayList<CompletionItem>(64)
         val seen = HashSet<String>()

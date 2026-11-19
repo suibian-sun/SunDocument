@@ -112,8 +112,15 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun init() {
         if (initialized) return
         initialized = true
-        for (i in 0..1) {
-            load(i, "/storage/emulated/0", record = false, pushHistory = false)
+        // 首栏先出，第二栏稍后一点，避免启动瞬间两倍 IO 抢同一个目录；
+        // 存储统计单独在后台跑，首帧不等它
+        load(0, "/storage/emulated/0", record = false, pushHistory = false)
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(140)
+            load(1, "/storage/emulated/0", record = false, pushHistory = false)
+        }
+        viewModelScope.launch {
+            _storage.value = withContext(Dispatchers.IO) { StorageStats.of("/storage/emulated/0") }
         }
     }
 
@@ -124,7 +131,14 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun setActive(index: Int) {
         if (index in 0..1 && index != _active.value) {
             _active.value = index
-            _storage.value = StorageStats.of(_panes.value[index].path)
+            // 存储统计要遍历分区，放到后台算，避免切栏时卡一下
+            val path = _panes.value[index].path
+            if (path.isNotEmpty()) {
+                viewModelScope.launch {
+                    val info = withContext(Dispatchers.IO) { StorageStats.of(path) }
+                    if (_active.value == index) _storage.value = info
+                }
+            }
         }
     }
 
@@ -239,7 +253,12 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             val p = _panes.value[i]
             if (p.path.isNotEmpty()) load(i, p.path, record = false, pushHistory = false)
         }
-        _storage.value = StorageStats.of(_panes.value[_active.value].path)
+        val path = _panes.value[_active.value].path
+        if (path.isNotEmpty()) {
+            viewModelScope.launch {
+                _storage.value = withContext(Dispatchers.IO) { StorageStats.of(path) }
+            }
+        }
     }
 
     /**
@@ -260,7 +279,12 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             val p = _panes.value[i]
             if (p.path.isNotEmpty()) load(i, p.path, record = false, pushHistory = false)
         }
-        _storage.value = StorageStats.of(_panes.value[_active.value].path)
+        val path = _panes.value[_active.value].path
+        if (path.isNotEmpty()) {
+            viewModelScope.launch {
+                _storage.value = withContext(Dispatchers.IO) { StorageStats.of(path) }
+            }
+        }
         _messages.tryEmit("已交换两栏")
     }
 
@@ -358,6 +382,60 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             refreshAll()
             _messages.tryEmit(fail ?: if (clip.cut) "移动完成" else "复制完成")
         }
+    }
+
+    /**
+     * 直接复制 / 移动到另一栏（MT 的双窗口操作）：
+     * 不用先剪切再粘贴，长按菜单一次完成。
+     */
+    fun copyToOtherPane(paths: List<String> = activePaneState.selected.toList()) = transfer(paths, false)
+
+    fun moveToOtherPane(paths: List<String> = activePaneState.selected.toList()) = transfer(paths, true)
+
+    private fun transfer(paths: List<String>, cut: Boolean) {
+        if (paths.isEmpty() || _busy.value != null) return
+        val destIndex = 1 - _active.value
+        val destDir = _panes.value[destIndex].currentDir
+        if (!destDir.isDirectory) {
+            _messages.tryEmit("另一栏不是有效目录")
+            return
+        }
+        viewModelScope.launch {
+            _busy.value = OpState(if (cut) "正在移动到另一栏…" else "正在复制到另一栏…")
+            val fail = withContext(Dispatchers.IO) {
+                var err: String? = null
+                for (path in paths) {
+                    val src = File(path)
+                    if (!src.exists()) continue
+                    if (src.isDirectory && FileRepo.isInside(src, destDir)) {
+                        err = "不能把文件夹放到自身内部"
+                        break
+                    }
+                    if (src.parentFile?.absolutePath == destDir.absolutePath) {
+                        err = "源目录与目标目录相同"
+                        break
+                    }
+                    try {
+                        if (cut) FileRepo.move(src, destDir) { n, d, t -> report(n, d, t) }
+                        else FileRepo.copy(src, destDir) { n, d, t -> report(n, d, t) }
+                    } catch (e: Exception) {
+                        err = e.message ?: "操作失败"
+                        break
+                    }
+                }
+                err
+            }
+            _busy.value = null
+            mutate(_active.value) { it.copy(selected = emptySet()) }
+            refreshAll()
+            val destName = destDir.name.ifEmpty { "/" }
+            _messages.tryEmit(fail ?: if (cut) "已移动到 $destName" else "已复制到 $destName")
+        }
+    }
+
+    /** 解压到当前栏目录 */
+    fun extractHere(file: File) {
+        extractArchive(file, activePaneState.currentDir)
     }
 
     private fun report(name: String, done: Long, total: Long) {
@@ -469,7 +547,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             _busy.value = OpState("正在解压…", "", 0, 0)
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    FileRepo.extractZip(archive, destDir) { name, done, total ->
+                    FileRepo.extractArchive(archive, destDir) { name, done, total ->
                         _busy.value = OpState("正在解压…", name, done.toLong(), total.toLong())
                     }
                 }

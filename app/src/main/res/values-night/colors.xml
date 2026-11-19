@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动窗口与系统栏在深色模式下用同一套黑，避免冷启动闪一下浅色 -->
+    <color name="bg">#FF08090C</color>
+    <color name="accent">#FF4C8DFF</color>
+</resources>

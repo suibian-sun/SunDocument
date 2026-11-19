@@ -468,6 +468,8 @@ fun OpenWithSheet(
             com.suibian.sunfile.data.FileKind.IMAGE -> add(OpenMode.IMAGE)
             com.suibian.sunfile.data.FileKind.AUDIO -> add(OpenMode.AUDIO)
             com.suibian.sunfile.data.FileKind.VIDEO -> add(OpenMode.VIDEO)
+            com.suibian.sunfile.data.FileKind.OFFICE ->
+                if (FileKinds.isDocumentReadable(file)) add(OpenMode.DOCUMENT)
             else -> Unit
         }
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
@@ -547,6 +549,7 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.IMAGE -> Icons.Outlined.Image
     OpenMode.AUDIO -> Icons.Outlined.MusicNote
     OpenMode.VIDEO -> Icons.Outlined.Movie
+    OpenMode.DOCUMENT -> Icons.Outlined.Description
     OpenMode.ARCHIVE -> Icons.Outlined.Archive
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
@@ -554,10 +557,11 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
 private fun modeHint(mode: OpenMode) = when (mode) {
     OpenMode.TEXT -> "语法高亮、补全，可直接编辑保存"
     OpenMode.HEX -> "按字节查看任意大小的文件"
-    OpenMode.IMAGE -> "内置缩放查看大图"
-    OpenMode.AUDIO -> "内置播放器，可拖动进度"
-    OpenMode.VIDEO -> "内置全屏播放，可暂停与拖动"
-    OpenMode.ARCHIVE -> "浏览 zip/apk 内部文件并解压"
+    OpenMode.IMAGE -> "内置缩放，可左右滑动切换"
+    OpenMode.AUDIO -> "底部小窗播放，可切上一首下一首"
+    OpenMode.VIDEO -> "全屏播放，左右滑动切换"
+    OpenMode.DOCUMENT -> "直接读取 Word / Excel / PPT 内容"
+    OpenMode.ARCHIVE -> "浏览 zip / tar 内部文件并解压"
     OpenMode.EXTERNAL -> "交给系统中已安装的应用"
 }
 

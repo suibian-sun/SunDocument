@@ -54,7 +54,7 @@ class PrefsStore private constructor(context: Context) {
         useAccelerator = sp.getBoolean("use_accelerator", true),
         autoCheckUpdate = sp.getBoolean("auto_check_update", true),
         openWith = decodeOpenWith(sp.getString("open_with", "") ?: ""),
-        editorFontSize = sp.getInt("editor_font_size", 13).coerceIn(8, 40),
+        editorFontSize = sp.getInt("editor_font_size", 13).coerceIn(6, 40),
         editorWrap = sp.getBoolean("editor_wrap", false),
         editorLineNumbers = sp.getBoolean("editor_line_numbers", true),
         editorCompletion = sp.getBoolean("editor_completion", true),

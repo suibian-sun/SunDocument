@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.WrapText
+import androidx.compose.material.icons.outlined.Visibility
 import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -108,6 +109,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.suibian.sunfile.data.AppPrefs
+import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.Revision
 import com.suibian.sunfile.ui.components.CircularReveal
 import com.suibian.sunfile.ui.components.DrawCheck
@@ -116,6 +118,7 @@ import com.suibian.sunfile.ui.editor.CompletionEngine
 import com.suibian.sunfile.ui.editor.CompletionItem
 import com.suibian.sunfile.ui.editor.CompletionKind
 import com.suibian.sunfile.ui.editor.CompletionResult
+import com.suibian.sunfile.ui.editor.Lang
 import com.suibian.sunfile.ui.editor.Syntax
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.NumberStyle
@@ -180,6 +183,8 @@ fun EditorOverlay(
     var burstKey by remember { mutableIntStateOf(0) }
     var completion by remember { mutableStateOf<CompletionResult?>(null) }
     var completionIndex by remember { mutableIntStateOf(0) }
+    var encodingMenu by remember { mutableStateOf(false) }
+    var previewOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(file) {
         visible = true
@@ -379,6 +384,12 @@ fun EditorOverlay(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (state.lang == Lang.HTML || state.lang == Lang.MARKDOWN) {
+                    EditorIcon(
+                        icon = Icons.Outlined.Visibility,
+                        label = if (state.lang == Lang.MARKDOWN) "预览 Markdown" else "预览网页"
+                    ) { previewOpen = true }
+                }
                 EditorIcon(Icons.Default.Undo, "撤销", enabled = state.canUndo) { vm.undo() }
                 EditorIcon(Icons.Default.Redo, "重做", enabled = state.canRedo) { vm.redo() }
                 SaveButton(
@@ -430,7 +441,7 @@ fun EditorOverlay(
                         }
                         EditorMenu("字号 −", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
-                            fontSize = (fontSize - 1).coerceAtLeast(9)
+                            fontSize = (fontSize - 1).coerceAtLeast(6)
                             onEditorPrefs(fontSize, null, null, null)
                         }
                         EditorMenu("历史版本", Icons.Default.History) {
@@ -530,14 +541,14 @@ fun EditorOverlay(
                                 if (event.changes.size >= 2) {
                                     val z = event.calculateZoom()
                                     if (z != 1f && z > 0f) {
-                                        acc = (acc * z).coerceIn(0.25f, 4f)
+                                        acc = (acc * z).coerceIn(0.18f, 4.5f)
                                         zoomPreview = acc
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
                                 if (event.changes.none { it.pressed }) break
                             }
-                            val next = (liveFontSize * acc).roundToInt().coerceIn(9, 28)
+                            val next = (liveFontSize * acc).roundToInt().coerceIn(6, 30)
                             zoomPreview = 1f
                             if (next != fontSize) {
                                 fontSize = next
@@ -714,11 +725,45 @@ fun EditorOverlay(
                     color = SunColors.TextTertiary,
                     style = NumberStyle
                 )
-                Text(
-                    state.encoding + if (value.text != state.baseline) "  ·  未保存" else "",
-                    color = if (value.text != state.baseline) SunColors.Warning else SunColors.TextTertiary,
-                    fontSize = 9.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (value.text != state.baseline) {
+                        Text("未保存", color = SunColors.Warning, fontSize = 9.sp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Box {
+                        Text(
+                            state.encoding,
+                            color = SunColors.TextTertiary,
+                            fontSize = 9.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .clickable { encodingMenu = true }
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                        DropdownMenu(
+                            expanded = encodingMenu,
+                            onDismissRequest = { encodingMenu = false },
+                            modifier = Modifier.background(SunColors.Surface4, SunShapes.Medium)
+                        ) {
+                            FileRepo.ENCODINGS.forEach { name ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            name,
+                                            color = if (name == state.encoding) SunColors.Accent else SunColors.TextPrimary,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    onClick = {
+                                        encodingMenu = false
+                                        vm.setEncoding(name)
+                                    },
+                                    modifier = Modifier.heightIn(min = 38.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -823,6 +868,15 @@ fun EditorOverlay(
                     }
                 }) { Text("直接退出", color = SunColors.Danger, fontSize = 13.sp) }
             }
+        )
+    }
+
+    if (previewOpen) {
+        PreviewOverlay(
+            file = state.file ?: file,
+            content = value.text,
+            markdown = state.lang == Lang.MARKDOWN,
+            onClose = { previewOpen = false }
         )
     }
 }

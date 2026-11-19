@@ -66,14 +66,19 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Android
+import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material.icons.outlined.Star
@@ -130,6 +135,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.suibian.sunfile.BuildConfig
 import com.suibian.sunfile.data.FileEntry
+import com.suibian.sunfile.data.FileKind
 import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.OpenMode
@@ -166,10 +172,11 @@ sealed interface Page {
 /** 内置全屏查看器 */
 private sealed interface Viewer {
     data class Hex(val file: File) : Viewer
-    data class Image(val file: File) : Viewer
+    data class Image(val file: File, val playlist: List<File>) : Viewer
     data class Archive(val file: File) : Viewer
-    data class Audio(val file: File) : Viewer
-    data class Video(val file: File) : Viewer
+    data class Audio(val file: File, val playlist: List<File>) : Viewer
+    data class Video(val file: File, val playlist: List<File>) : Viewer
+    data class Doc(val file: File) : Viewer
 }
 
 @Composable
@@ -207,6 +214,7 @@ fun MainScreen(
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     var openWithTarget by remember { mutableStateOf<File?>(null) }
     var openFailure by remember { mutableStateOf<File?>(null) }
+    var contextMenu by remember { mutableStateOf<Pair<FileEntry, Offset>?>(null) }
 
     LaunchedEffect(Unit) { vm.init() }
 
@@ -250,6 +258,14 @@ fun MainScreen(
         }
     }
 
+    // 同一目录下的同类文件，供查看器左右滑动切换
+    fun playlistOf(file: File, kind: FileKind): List<File> {
+        val list = panes[active].entries
+            .filter { !it.isDir && FileKinds.kindOfName(it.name) == kind }
+            .map { it.file }
+        return if (list.any { it.absolutePath == file.absolutePath }) list else listOf(file)
+    }
+
     fun openWith(file: File, mode: OpenMode, origin: Offset = Offset.Zero) {
         when (mode) {
             OpenMode.TEXT -> {
@@ -257,9 +273,10 @@ fun MainScreen(
                 editorTarget = file
             }
             OpenMode.HEX -> viewer = Viewer.Hex(file)
-            OpenMode.IMAGE -> viewer = Viewer.Image(file)
-            OpenMode.AUDIO -> viewer = Viewer.Audio(file)
-            OpenMode.VIDEO -> viewer = Viewer.Video(file)
+            OpenMode.IMAGE -> viewer = Viewer.Image(file, playlistOf(file, FileKind.IMAGE))
+            OpenMode.AUDIO -> viewer = Viewer.Audio(file, playlistOf(file, FileKind.AUDIO))
+            OpenMode.VIDEO -> viewer = Viewer.Video(file, playlistOf(file, FileKind.VIDEO))
+            OpenMode.DOCUMENT -> viewer = Viewer.Doc(file)
             OpenMode.ARCHIVE -> viewer = Viewer.Archive(file)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
@@ -353,11 +370,14 @@ fun MainScreen(
                                 openFile(entry.file, origin)
                             }
                         },
-                        onLongPress = { index, entry ->
+                        onLongPress = { index, entry, origin ->
                             vm.setActive(index)
-                            vm.toggleSelect(entry)
+                            contextMenu = entry to origin
                         },
-                        onEntryMore = { sheet = SheetKind.Entry(it) },
+                        onToggleSelect = { index, entry ->
+                            vm.setActive(index)
+                            vm.toggleSelect(entry, index)
+                        },
                         onUp = { index -> vm.goUp(index) },
                         onRefresh = { index -> vm.refreshPane(index) },
                         onToggleBookmark = { path -> vm.toggleBookmark(path) },
@@ -463,6 +483,85 @@ fun MainScreen(
                     .padding(bottom = 74.dp, start = 12.dp, end = 12.dp)
             )
         }
+    }
+
+    // ---------------- 长按菜单 ----------------
+
+    contextMenu?.let { (entry, anchorPos) ->
+        val target = entry.file
+        val paths = listOf(entry.path)
+        val isApk = target.extension.equals("apk", true)
+        EntryActionMenu(
+            entry = entry,
+            anchor = anchorPos,
+            onDismiss = { contextMenu = null },
+            actions = buildList {
+                add(
+                    EntryAction(
+                        icon = if (entry.isDir) Icons.Outlined.FolderOpen else Icons.Outlined.OpenInNew,
+                        label = if (entry.isDir) "进入文件夹" else "打开"
+                    ) {
+                        if (entry.isDir) vm.open(active, entry.path) else openFile(target, anchorPos)
+                    }
+                )
+                if (!entry.isDir) {
+                    add(EntryAction(Icons.Outlined.OpenInNew, "打开方式…") { openWithTarget = target })
+                }
+                add(EntryAction(Icons.Outlined.ContentCopy, "复制到另一栏", "双栏") { vm.copyToOtherPane(paths) })
+                add(EntryAction(Icons.Outlined.ContentCut, "移动到另一栏", "双栏") { vm.moveToOtherPane(paths) })
+                add(EntryAction(Icons.Outlined.ContentCopy, "复制") {
+                    vm.selectOnly(entry)
+                    vm.setClipboard(false)
+                })
+                add(EntryAction(Icons.Outlined.ContentCut, "剪切") {
+                    vm.selectOnly(entry)
+                    vm.setClipboard(true)
+                })
+                add(EntryAction(Icons.Outlined.DriveFileRenameOutline, "重命名") {
+                    dialog = DialogKind.Rename(target)
+                })
+                add(EntryAction(Icons.Outlined.Archive, "压缩为 ZIP") {
+                    dialog = DialogKind.Compress(paths)
+                })
+                if (!entry.isDir && FileKinds.isZipReadable(target)) {
+                    add(EntryAction(Icons.Outlined.Unarchive, "解压到当前目录") { vm.extractHere(target) })
+                }
+                if (isApk) {
+                    add(EntryAction(Icons.Outlined.Android, "安装") {
+                        if (!installApk(context, target)) {
+                            Toast.makeText(context, "无法启动安装程序", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                }
+                if (!entry.isDir) {
+                    add(EntryAction(Icons.Outlined.Description, "用文本打开") {
+                        openWith(target, OpenMode.TEXT)
+                    })
+                    add(EntryAction(Icons.Outlined.Share, "分享") {
+                        if (!shareFile(context, target)) {
+                            Toast.makeText(context, "分享失败", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                }
+                add(EntryAction(Icons.Outlined.Info, "属性") {
+                    dialog = DialogKind.Properties(target)
+                })
+                add(EntryAction(Icons.Outlined.SelectAll, "多选") { vm.selectOnly(entry) })
+                add(EntryAction(Icons.Outlined.ContentCopy, "复制路径") { copyPath(entry.path) })
+                add(
+                    EntryAction(
+                        Icons.Outlined.BookmarkBorder,
+                        if (prefs.bookmarks.contains(if (entry.isDir) entry.path else (target.parent ?: entry.path)))
+                            "取消收藏" else "收藏当前目录"
+                    ) {
+                        vm.toggleBookmark(if (entry.isDir) entry.path else (target.parent ?: entry.path))
+                    }
+                )
+                add(EntryAction(Icons.Outlined.Delete, "删除", danger = true) {
+                    dialog = DialogKind.Delete(paths)
+                })
+            }
+        )
     }
 
     // ---------------- 底部面板 ----------------
@@ -744,9 +843,17 @@ fun MainScreen(
     // 查看器
     when (val v = viewer) {
         is Viewer.Hex -> HexViewerOverlay(v.file) { viewer = null }
-        is Viewer.Image -> ImageViewerOverlay(v.file) { viewer = null }
-        is Viewer.Audio -> AudioViewerOverlay(v.file) { viewer = null }
-        is Viewer.Video -> VideoViewerOverlay(v.file) { viewer = null }
+        is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { viewer = null }
+        is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { viewer = null }
+        is Viewer.Video -> VideoViewerOverlay(v.file, v.playlist) { viewer = null }
+        is Viewer.Doc -> DocumentViewerOverlay(
+            file = v.file,
+            onClose = { viewer = null },
+            onOpenExternal = { f ->
+                viewer = null
+                if (!openExternally(context, f)) openWithTarget = f
+            }
+        )
         is Viewer.Archive -> ArchiveOverlay(
             file = v.file,
             destDir = panes[active].currentDir,
@@ -755,6 +862,10 @@ fun MainScreen(
                 val dest = panes[active].currentDir
                 viewer = null
                 vm.extractArchive(v.file, dest)
+            },
+            onOpenEntry = { temp ->
+                viewer = null
+                openFile(temp, Offset.Zero)
             }
         )
         null -> Unit
@@ -781,8 +892,8 @@ private fun FilesPage(
     onActivate: (Int) -> Unit,
     onPathClick: () -> Unit,
     onOpenEntry: (Int, FileEntry, Offset) -> Unit,
-    onLongPress: (Int, FileEntry) -> Unit,
-    onEntryMore: (FileEntry) -> Unit,
+    onLongPress: (Int, FileEntry, Offset) -> Unit,
+    onToggleSelect: (Int, FileEntry) -> Unit,
     onUp: (Int) -> Unit,
     onRefresh: (Int) -> Unit,
     onToggleBookmark: (String) -> Unit,
@@ -864,12 +975,12 @@ private fun FilesPage(
                 modifier = Modifier.weight(1f),
                 onActivate = { onActivate(0) },
                 onOpen = { entry, origin -> onOpenEntry(0, entry, origin) },
-                onLongPress = { onLongPress(0, it) },
-                onMore = onEntryMore,
+                onLongPress = { entry, origin -> onLongPress(0, entry, origin) },
+                onToggle = { onToggleSelect(0, it) },
                 onUp = { onUp(0) },
                 onRefresh = { onRefresh(0) }
             )
-            PaneDivider(active = active == 0)
+            PaneDivider()
             PaneView(
                 index = 1,
                 pane = panes[1],
@@ -878,8 +989,8 @@ private fun FilesPage(
                 modifier = Modifier.weight(1f),
                 onActivate = { onActivate(1) },
                 onOpen = { entry, origin -> onOpenEntry(1, entry, origin) },
-                onLongPress = { onLongPress(1, it) },
-                onMore = onEntryMore,
+                onLongPress = { entry, origin -> onLongPress(1, entry, origin) },
+                onToggle = { onToggleSelect(1, it) },
                 onUp = { onUp(1) },
                 onRefresh = { onRefresh(1) }
             )
@@ -1158,14 +1269,13 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
 
 // ---------------- 单栏 ----------------
 
+/**
+ * 两栏之间只用一条与内容同色的细线分隔。
+ * 聚焦状态改由栏底色与内容亮度表达，不再出现蓝色高亮线。
+ */
 @Composable
-private fun PaneDivider(active: Boolean) {
-    val color by animateColorAsState(
-        targetValue = if (active) SunColors.Accent.copy(alpha = 0.55f) else SunColors.Hairline,
-        animationSpec = tween(Motion.Base),
-        label = "divider"
-    )
-    Box(Modifier.width(1.dp).fillMaxHeight().background(color))
+private fun PaneDivider() {
+    Box(Modifier.width(1.dp).fillMaxHeight().background(SunColors.Hairline.copy(alpha = 0.7f)))
 }
 
 @Composable
@@ -1177,20 +1287,21 @@ private fun PaneView(
     modifier: Modifier = Modifier,
     onActivate: () -> Unit,
     onOpen: (FileEntry, Offset) -> Unit,
-    onLongPress: (FileEntry) -> Unit,
-    onMore: (FileEntry) -> Unit,
+    onLongPress: (FileEntry, Offset) -> Unit,
+    onToggle: (FileEntry) -> Unit,
     onUp: () -> Unit,
     onRefresh: () -> Unit
 ) {
+    // 聚焦栏用底色区分：暗色下抬一层、亮色下压一层，不靠彩色线条
     val bg by animateColorAsState(
-        targetValue = if (active) SunColors.Surface1.copy(alpha = if (SunColors.dark) 0.55f else 0.75f) else Color.Transparent,
-        animationSpec = tween(Motion.Base),
+        targetValue = if (active) SunColors.Surface1 else Color.Transparent,
+        animationSpec = tween(Motion.Slow, easing = Motion.EaseOut),
         label = "paneBg"
     )
-    val accentAlpha by animateFloatAsState(
-        targetValue = if (active) 1f else 0f,
-        animationSpec = tween(Motion.Base),
-        label = "paneAccent"
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (active) 1f else 0.86f,
+        animationSpec = tween(Motion.Slow, easing = Motion.EaseOut),
+        label = "paneAlpha"
     )
 
     Column(
@@ -1212,24 +1323,17 @@ private fun PaneView(
                 }
             }
     ) {
-        // 激活指示线：聚焦栏顶部一道细光，代替文字标签
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.5.dp)
-                .background(SunColors.Accent.copy(alpha = 0.75f * accentAlpha))
-        )
-
         // 固定的「..」上级目录行
         UpRow(enabled = pane.canUp, onClick = { onActivate(); if (pane.canUp) onUp() })
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             PaneList(
                 pane = pane,
+                alpha = contentAlpha,
                 scrollMemory = scrollMemory,
                 onOpen = { entry, origin -> onActivate(); onOpen(entry, origin) },
-                onLongPress = { onActivate(); onLongPress(it) },
-                onMore = { onActivate(); onMore(it) },
+                onLongPress = { entry, origin -> onActivate(); onLongPress(entry, origin) },
+                onToggle = { onActivate(); onToggle(it) },
                 onRetry = { onActivate(); onRefresh() },
                 onUp = { onActivate(); onUp() }
             )
@@ -1272,10 +1376,11 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun PaneList(
     pane: PaneState,
+    alpha: Float,
     scrollMemory: MutableMap<String, Int>,
     onOpen: (FileEntry, Offset) -> Unit,
-    onLongPress: (FileEntry) -> Unit,
-    onMore: (FileEntry) -> Unit,
+    onLongPress: (FileEntry, Offset) -> Unit,
+    onToggle: (FileEntry) -> Unit,
     onRetry: () -> Unit,
     onUp: () -> Unit
 ) {
@@ -1417,11 +1522,11 @@ private fun PaneList(
                         entry = entry,
                         selected = pane.selected.contains(entry.path),
                         selectionMode = pane.selectionMode,
+                        alpha = alpha,
                         onClick = { origin ->
-                            if (pane.selectionMode) onLongPress(entry) else onOpen(entry, origin)
+                            if (pane.selectionMode) onToggle(entry) else onOpen(entry, origin)
                         },
-                        onLongClick = { onLongPress(entry) },
-                        onMore = { onMore(entry) }
+                        onLongClick = { origin -> onLongPress(entry, origin) }
                     )
                 }
             }
@@ -1437,9 +1542,9 @@ private fun FileRow(
     entry: FileEntry,
     selected: Boolean,
     selectionMode: Boolean,
+    alpha: Float,
     onClick: (Offset) -> Unit,
-    onLongClick: () -> Unit,
-    onMore: () -> Unit
+    onLongClick: (Offset) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     var rowOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -1461,17 +1566,17 @@ private fun FileRow(
             .combinedClickable(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
-                onLongClick = onLongClick,
+                onLongClick = { onLongClick(rowOrigin) },
                 onClick = { onClick(rowOrigin) }
             )
-            .padding(start = 9.dp, end = 1.dp),
+            .padding(start = 9.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         FileTypeBadge(
             file = entry.file,
             isDir = entry.isDir,
             size = 26.dp,
-            modifier = Modifier.alpha(if (entry.canRead) 1f else 0.45f)
+            modifier = Modifier.alpha((if (entry.canRead) 1f else 0.45f) * alpha)
         )
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
@@ -1508,15 +1613,6 @@ private fun FileRow(
                 background = SunColors.Accent
             )
             Spacer(Modifier.width(5.dp))
-        } else {
-            IconButton(onClick = onMore, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "更多",
-                    tint = SunColors.TextTertiary,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
         }
     }
 }

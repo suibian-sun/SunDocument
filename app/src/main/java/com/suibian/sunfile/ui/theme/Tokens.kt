@@ -70,18 +70,18 @@ data class SunPalette(
 
 val DarkPalette = SunPalette(
     dark = true,
-    Bg = Color(0xFF0F1318),
-    Surface1 = Color(0xFF12171D),
-    Surface2 = Color(0xFF151B22),
-    Surface3 = Color(0xFF181F27),
-    Surface4 = Color(0xFF1C242D),
-    Hairline = Color(0xFF1D2530),
-    TextPrimary = Color(0xFFE8EDF2),
-    TextSecondary = Color(0xFF98A2AE),
-    TextTertiary = Color(0xFF67717D),
-    Accent = Color(0xFF4B8DF8),
-    AccentSoft = Color(0x294B8DF8),
-    AccentLine = Color(0xFF2B5FA8),
+    Bg = Color(0xFF08090C),
+    Surface1 = Color(0xFF101318),
+    Surface2 = Color(0xFF161B21),
+    Surface3 = Color(0xFF1B2128),
+    Surface4 = Color(0xFF212830),
+    Hairline = Color(0xFF242B33),
+    TextPrimary = Color(0xFFE9EEF4),
+    TextSecondary = Color(0xFF9BA5B1),
+    TextTertiary = Color(0xFF6A7480),
+    Accent = Color(0xFF4C8DFF),
+    AccentSoft = Color(0x264C8DFF),
+    AccentLine = Color(0xFF2A5FAF),
     Folder = Color(0xFFD9A93F),
     File = Color(0xFF7E8895),
     Danger = Color(0xFFE5534B),
@@ -98,18 +98,18 @@ val DarkPalette = SunPalette(
 
 val LightPalette = SunPalette(
     dark = false,
-    Bg = Color(0xFFF7F8FA),
+    Bg = Color(0xFFF1F2F4),
     Surface1 = Color(0xFFFFFFFF),
-    Surface2 = Color(0xFFF2F4F7),
-    Surface3 = Color(0xFFEAEDF1),
+    Surface2 = Color(0xFFEBEDF1),
+    Surface3 = Color(0xFFE2E5EA),
     Surface4 = Color(0xFFFFFFFF),
-    Hairline = Color(0xFFE1E5EA),
-    TextPrimary = Color(0xFF16191D),
-    TextSecondary = Color(0xFF59636D),
-    TextTertiary = Color(0xFF8B959F),
-    Accent = Color(0xFF2563EB),
-    AccentSoft = Color(0x1F2563EB),
-    AccentLine = Color(0xFF93B4F5),
+    Hairline = Color(0xFFDCE0E5),
+    TextPrimary = Color(0xFF14171B),
+    TextSecondary = Color(0xFF58626C),
+    TextTertiary = Color(0xFF8A949E),
+    Accent = Color(0xFF1F6FEB),
+    AccentSoft = Color(0x1A1F6FEB),
+    AccentLine = Color(0xFF9DBAF3),
     Folder = Color(0xFFC0841B),
     File = Color(0xFF6B7580),
     Danger = Color(0xFFD1362D),
@@ -134,18 +134,18 @@ val SunColors: SunPalette
 
 /**
  * 动效令牌：进场缓出、退场缓入、页面内移动缓入缓出。
- * 时长统一走 150 / 250 / 300 / 380 / 520 五档，全站复用。
+ * 整体节拍比常见默认值慢一档，让转场能看清「从哪来、到哪去」。
  */
 object Motion {
-    const val Fast = 150
-    const val Base = 250
-    const val Slow = 300
-    const val Reveal = 380
-    const val Page = 520
+    const val Fast = 180
+    const val Base = 300
+    const val Slow = 380
+    const val Reveal = 460
+    const val Page = 600
 
-    val EaseIn = CubicBezierEasing(0.42f, 0f, 1f, 1f)
-    val EaseOut = CubicBezierEasing(0f, 0f, 0.2f, 1f)
-    val EaseInOut = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+    val EaseIn = CubicBezierEasing(0.4f, 0f, 1f, 1f)
+    val EaseOut = CubicBezierEasing(0f, 0f, 0.16f, 1f)
+    val EaseInOut = CubicBezierEasing(0.42f, 0f, 0.18f, 1f)
     val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
     /** 按压回弹：有重量、不过冲 */
@@ -162,7 +162,7 @@ object Motion {
 
     /** 弹性到位：轻微过冲，用于浮层出现 */
     fun pop() = spring<Float>(
-        dampingRatio = 0.62f,
+        dampingRatio = 0.7f,
         stiffness = Spring.StiffnessLow
     )
 }

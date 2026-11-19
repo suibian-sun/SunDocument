@@ -2,20 +2,35 @@ package com.suibian.sunfile.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
+import android.graphics.drawable.Drawable
+import android.os.Build
+import android.widget.ImageView
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
+import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,9 +49,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,10 +59,14 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,12 +79,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,17 +96,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.suibian.sunfile.data.FileRepo
+import androidx.compose.ui.viewinterop.AndroidView
 import com.suibian.sunfile.data.FileKinds
+import com.suibian.sunfile.data.FileRepo
+import com.suibian.sunfile.ui.components.FileTypeBadge
 import com.suibian.sunfile.ui.theme.Motion
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
@@ -96,6 +122,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 // ---------------- 通用外壳 ----------------
 
@@ -110,13 +139,13 @@ private fun OverlayShell(
     content: @Composable () -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { visible = true }
     BackHandler { onClose() }
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(220, easing = Motion.EaseOut)) +
-            slideInVertically(tween(300, easing = Motion.EaseOut)) { it / 18 }
+        enter = fadeIn(tween(Motion.Base, easing = Motion.EaseOut)) +
+            slideInVertically(tween(Motion.Slow, easing = Motion.EaseOut)) { it / 16 },
+        exit = fadeOut(tween(Motion.Fast))
     ) {
         Column(
             Modifier
@@ -126,7 +155,7 @@ private fun OverlayShell(
                 .navigationBarsPadding()
         ) {
             Row(
-                Modifier.fillMaxWidth().height(56.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().height(54.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onClose, modifier = Modifier.size(42.dp)) {
@@ -184,7 +213,7 @@ fun HexViewerOverlay(file: File, onClose: () -> Unit) {
 
     OverlayShell(
         title = file.name,
-        subtitle = "${Fmt.size(size)} · 偏移 0x${offset.toString(16).uppercase(Locale.US)}",
+        subtitle = "${Fmt.size(size)} · 0x${offset.toString(16).uppercase(Locale.US)}",
         onClose = onClose,
         actions = {
             TextButton(onClick = { offset = 0L }) { Text("开头", color = SunColors.TextSecondary, fontSize = 11.sp) }
@@ -199,12 +228,7 @@ fun HexViewerOverlay(file: File, onClose: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("偏移", color = SunColors.TextTertiary, fontSize = 9.sp, modifier = Modifier.width(66.dp))
-                Text(
-                    "字节 (hex)",
-                    color = SunColors.TextTertiary,
-                    fontSize = 9.sp,
-                    modifier = Modifier.weight(1f)
-                )
+                Text("字节 (hex)", color = SunColors.TextTertiary, fontSize = 9.sp, modifier = Modifier.weight(1f))
                 Text("ASCII", color = SunColors.TextTertiary, fontSize = 9.sp, modifier = Modifier.width(74.dp))
             }
 
@@ -221,8 +245,7 @@ fun HexViewerOverlay(file: File, onClose: () -> Unit) {
                 else -> LazyColumn(Modifier.weight(1f)) {
                     val lines = (data.size + HEX_PER_LINE - 1) / HEX_PER_LINE
                     items(lines) { li ->
-                        val start = li * HEX_PER_LINE
-                        HexRow(baseOffset = offset + start, data = data, start = start)
+                        HexRow(baseOffset = offset + li * HEX_PER_LINE, data = data, start = li * HEX_PER_LINE)
                     }
                 }
             }
@@ -249,9 +272,7 @@ fun HexViewerOverlay(file: File, onClose: () -> Unit) {
                     "下一页 ▶",
                     color = SunColors.TextSecondary,
                     fontSize = 11.sp,
-                    modifier = Modifier.clickable(enabled = offset + HEX_PAGE < size) {
-                        offset += HEX_PAGE
-                    }
+                    modifier = Modifier.clickable(enabled = offset + HEX_PAGE < size) { offset += HEX_PAGE }
                 )
             }
         }
@@ -275,10 +296,7 @@ private fun HexRow(baseOffset: Long, data: ByteArray, start: Int) {
         }
     }
     Row(
-        Modifier
-            .fillMaxWidth()
-            .height(22.dp)
-            .padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -310,74 +328,215 @@ private fun HexRow(baseOffset: Long, data: ByteArray, start: Int) {
 // ---------------- 图片查看器 ----------------
 
 @Composable
-fun ImageViewerOverlay(file: File, onClose: () -> Unit) {
-    var bitmap by remember(file) { mutableStateOf<Bitmap?>(null) }
-    var failed by remember(file) { mutableStateOf(false) }
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
-    LaunchedEffect(file) {
-        val bmp = withContext(Dispatchers.IO) { decodeSampled(file, 2400) }
-        if (bmp == null) failed = true else bitmap = bmp
+fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
+    val list = remember(playlist, file) {
+        if (playlist.any { it.absolutePath == file.absolutePath }) playlist else listOf(file)
     }
+    var index by remember(file) {
+        mutableIntStateOf(list.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0))
+    }
+    var direction by remember { mutableIntStateOf(0) }
+    val current = list.getOrElse(index) { file }
 
-    val transformState = rememberTransformableState { zoom, pan, _ ->
-        scale = (scale * zoom).coerceIn(1f, 8f)
-        offset = if (scale <= 1.01f) Offset.Zero else offset + pan
+    fun go(delta: Int) {
+        val next = index + delta
+        if (next !in list.indices) return
+        direction = delta
+        index = next
     }
 
     OverlayShell(
-        title = file.name,
-        subtitle = bitmap?.let { "${it.width} × ${it.height} · ${Fmt.size(file.length())}" }
-            ?: Fmt.size(file.length()),
+        title = current.name,
+        subtitle = "${index + 1} / ${list.size} · ${Fmt.size(current.length())}",
         onClose = onClose,
-        background = Color(0xFF07090C)
+        background = Color(0xFF050608),
+        actions = {
+            ShareButton(current)
+        }
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val bmp = bitmap
-            when {
-                failed -> Text("这张图片无法解码", color = SunColors.TextSecondary, fontSize = 12.sp)
-
-                bmp == null -> CircularProgressIndicator(
-                    Modifier.size(22.dp),
-                    color = SunColors.Accent,
-                    strokeWidth = 2.dp
-                )
-
-                else -> Box(
-                    Modifier
-                        .fillMaxSize()
-                        .transformable(transformState)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onDoubleTap = {
-                                if (scale > 1.5f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                } else {
-                                    scale = 2.5f
-                                }
-                            })
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = file.name,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = offset.x
-                                translationY = offset.y
-                            }
-                    )
-                }
+            AnimatedContent(
+                targetState = current,
+                transitionSpec = {
+                    val dir = if (direction >= 0) 1 else -1
+                    (slideInHorizontally(tween(Motion.Slow, easing = Motion.EaseOut)) { w -> dir * w / 3 } +
+                        fadeIn(tween(Motion.Base))) togetherWith
+                        (slideOutHorizontally(tween(Motion.Slow, easing = Motion.EaseIn)) { w -> -dir * w / 3 } +
+                            fadeOut(tween(Motion.Base)))
+                },
+                label = "image"
+            ) { target ->
+                ZoomableImage(target, onSwipe = { go(it) })
             }
 
+            if (list.size > 1) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 22.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (index > 0) ArrowChip(Icons.Outlined.ArrowBack) { go(-1) }
+                    Spacer(Modifier.width(12.dp))
+                    Row(horizontalArrangement = Arrangement.Center) {
+                        repeat(min(list.size, 9)) { i ->
+                            val start = (index - 4).coerceIn(0, (list.size - 9).coerceAtLeast(0))
+                            val active = i + start == index
+                            Box(
+                                Modifier
+                                    .padding(horizontal = 2.5.dp)
+                                    .size(if (active) 6.dp else 4.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (active) Color.White else Color.White.copy(alpha = 0.3f)
+                                    )
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    if (index < list.lastIndex) ArrowChip(Icons.Outlined.ArrowForward) { go(1) }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun ArrowChip(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.12f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun ZoomableImage(file: File, onSwipe: (Int) -> Unit) {
+    val animated = Build.VERSION.SDK_INT >= 28 &&
+        file.extension.lowercase() in setOf("gif", "webp", "apng")
+    var bitmap by remember(file) { mutableStateOf<Bitmap?>(null) }
+    var failed by remember(file) { mutableStateOf(false) }
+    var scale by remember(file) { mutableFloatStateOf(1f) }
+    var offset by remember(file) { mutableStateOf(Offset.Zero) }
+    val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
+    val swipeEnabled = rememberUpdatedState(scale <= 1.01f)
+
+    LaunchedEffect(file, animated) {
+        if (animated) return@LaunchedEffect
+        val bmp = withContext(Dispatchers.IO) { decodeSampled(file, 2600) }
+        if (bmp == null) failed = true else bitmap = bmp
+    }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val bmp = bitmap
+        when {
+            failed -> Text("这张图片无法解码", color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+            animated -> AnimatedImage(
+                file = file,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
+                    }
+            )
+            bmp == null -> CircularProgressIndicator(Modifier.size(22.dp), color = SunColors.Accent, strokeWidth = 2.dp)
+            else -> Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var acc = 1f
+                            var dx = 0f
+                            var multi = false
+                            while (true) {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                if (e.changes.size >= 2) {
+                                    multi = true
+                                    val z = e.calculateZoom()
+                                    if (z > 0f && z != 1f) {
+                                        acc = (acc * z).coerceIn(0.5f, 1.6f)
+                                        e.changes.forEach { it.consume() }
+                                    }
+                                } else if (!multi && e.changes.size == 1) {
+                                    dx += e.changes[0].positionChange().x
+                                }
+                                if (e.changes.none { it.pressed }) break
+                            }
+                            if (multi) {
+                                val next = (scale * acc).coerceIn(1f, 8f)
+                                scale = next
+                                if (next <= 1.01f) offset = Offset.Zero
+                            } else if (swipeEnabled.value && abs(dx) > threshold) {
+                                onSwipe(if (dx < 0) 1 else -1)
+                            }
+                        }
+                    }
+                    .pointerInput(file) {
+                        detectTapGestures(onDoubleTap = {
+                            if (scale > 1.5f) {
+                                scale = 1f
+                                offset = Offset.Zero
+                            } else {
+                                scale = 2.6f
+                            }
+                        })
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = file.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                )
+            }
+        }
+    }
+}
+
+/** 动图（GIF / 动态 WebP / APNG）用系统解码器播放，静态图仍走 Bitmap */
+@RequiresApi(28)
+@Composable
+private fun AnimatedImage(file: File, modifier: Modifier) {
+    AndroidView(
+        factory = { ctx ->
+            ImageView(ctx).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            }
+        },
+        update = { view ->
+            if (view.tag != file.absolutePath) {
+                view.tag = file.absolutePath
+                runCatching { decodeAnimated(file) }.getOrNull()?.let { view.setImageDrawable(it) }
+            }
+        },
+        modifier = modifier
+    )
+}
+
+@RequiresApi(28)
+private fun decodeAnimated(file: File): Drawable? {
+    val source = ImageDecoder.createSource(file)
+    val drawable = ImageDecoder.decodeDrawable(source)
+    if (drawable is AnimatedImageDrawable) drawable.start()
+    return drawable
 }
 
 private fun decodeSampled(file: File, maxDim: Int): Bitmap? {
@@ -397,27 +556,52 @@ private fun decodeSampled(file: File, maxDim: Int): Bitmap? {
 
 private data class ArcNode(val name: String, val full: String, val isDir: Boolean, val size: Long)
 
+/**
+ * 压缩包浏览：点击文件不再弹只读预览，而是解压到缓存后直接交给编辑器 / 打开方式，
+ * 与 MT 的操作习惯一致。
+ */
 @Composable
 fun ArchiveOverlay(
     file: File,
     destDir: File,
     onClose: () -> Unit,
-    onExtractAll: () -> Unit
+    onExtractAll: () -> Unit,
+    onOpenEntry: (File) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var entries by remember(file) { mutableStateOf<List<FileRepo.ZipItem>?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     var prefix by remember(file) { mutableStateOf("") }
-    var preview by remember { mutableStateOf<Triple<String, String, Boolean>?>(null) }
+    var opening by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(file) {
-        val result = withContext(Dispatchers.IO) { runCatching { FileRepo.zipEntries(file) } }
+        val result = withContext(Dispatchers.IO) { runCatching { FileRepo.archiveEntries(file) } }
         result.onSuccess { entries = it }.onFailure { error = it.message ?: "无法读取压缩包" }
     }
 
     val list = entries
     val nodes = remember(list, prefix) { list?.let { immediateChildren(it, prefix) } ?: emptyList() }
+
+    fun openEntry(node: ArcNode) {
+        if (opening != null) return
+        opening = node.full
+        scope.launch {
+            val out = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = File(context.cacheDir, "archive/${file.nameWithoutExtension}")
+                    dir.mkdirs()
+                    FileRepo.extractArchiveEntry(file, node.full, dir)
+                }.getOrNull()
+            }
+            opening = null
+            if (out != null) {
+                onOpenEntry(out)
+            } else {
+                android.widget.Toast.makeText(context, "无法解压这个文件", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     OverlayShell(
         title = file.name,
@@ -454,8 +638,20 @@ fun ArchiveOverlay(
             }
 
             when {
-                error != null -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(error ?: "", color = SunColors.Danger, fontSize = 11.5.sp, textAlign = TextAlign.Center)
+                error != null -> Column(
+                    Modifier.fillMaxSize().padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("这个压缩格式暂不支持", color = SunColors.TextSecondary, fontSize = 12.5.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        error ?: "",
+                        color = SunColors.TextTertiary,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 15.sp
+                    )
                 }
 
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -472,37 +668,20 @@ fun ArchiveOverlay(
                             Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
-                                .clickable {
-                                    if (node.isDir) {
-                                        prefix = node.full
-                                    } else {
-                                        scope.launch {
-                                            val data = withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    FileRepo.readZipEntry(file, node.full, 256 * 1024)
-                                                }.getOrNull()
-                                            }
-                                            if (data != null) {
-                                                val isText = looksTextual(data)
-                                                val content = if (isText) {
-                                                    String(data, Charsets.UTF_8)
-                                                } else {
-                                                    hexPreview(data)
-                                                }
-                                                preview = Triple(node.full, content, isText)
-                                            }
-                                        }
-                                    }
+                                .clickable(enabled = opening == null) {
+                                    if (node.isDir) prefix = node.full else openEntry(node)
                                 }
                                 .padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                if (node.isDir) Icons.Outlined.Folder else Icons.Outlined.InsertDriveFile,
-                                null,
-                                tint = if (node.isDir) SunColors.Folder else SunColors.TextSecondary,
-                                modifier = Modifier.size(19.dp)
-                            )
+                            if (node.isDir) {
+                                com.suibian.sunfile.ui.components.MtFolderIcon(
+                                    Modifier.size(21.dp),
+                                    SunColors.Folder
+                                )
+                            } else {
+                                FileTypeBadge(File(node.full), isDir = false, size = 22.dp)
+                            }
                             Spacer(Modifier.width(12.dp))
                             Text(
                                 node.name,
@@ -513,11 +692,15 @@ fun ArchiveOverlay(
                                 modifier = Modifier.weight(1f)
                             )
                             if (!node.isDir) {
-                                Text(
-                                    Fmt.size(node.size),
-                                    color = SunColors.TextTertiary,
-                                    style = NumberStyle
-                                )
+                                if (opening == node.full) {
+                                    CircularProgressIndicator(
+                                        Modifier.size(12.dp),
+                                        color = SunColors.Accent,
+                                        strokeWidth = 1.5.dp
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(Fmt.size(node.size.coerceAtLeast(0)), color = SunColors.TextTertiary, style = NumberStyle)
                             }
                         }
                     }
@@ -525,7 +708,7 @@ fun ArchiveOverlay(
             }
 
             Row(
-                Modifier.fillMaxWidth().height(46.dp).background(SunColors.Surface1).padding(horizontal = 14.dp),
+                Modifier.fillMaxWidth().height(44.dp).background(SunColors.Surface1).padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Outlined.Archive, null, tint = SunColors.TextTertiary, modifier = Modifier.size(15.dp))
@@ -542,65 +725,6 @@ fun ArchiveOverlay(
                 )
             }
         }
-    }
-
-    preview?.let { (name, content, isText) ->
-        AlertDialog(
-            onDismissRequest = { preview = null },
-            containerColor = SunColors.Surface4,
-            shape = SunShapes.Medium,
-            title = {
-                Text(
-                    name.substringAfterLast('/'),
-                    color = SunColors.TextPrimary,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        if (isText) "文本" else "二进制",
-                        color = SunColors.TextTertiary,
-                        fontSize = 9.sp
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        content,
-                        color = SunColors.TextSecondary,
-                        fontSize = 9.5.sp,
-                        lineHeight = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .heightIn(max = 360.dp)
-                            .verticalScroll(rememberScrollState())
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    preview = null
-                    scope.launch {
-                        val out = withContext(Dispatchers.IO) {
-                            runCatching { FileRepo.extractZipEntry(file, name, destDir) }.getOrNull()
-                        }
-                        android.widget.Toast.makeText(
-                            context,
-                            if (out != null) "已解压到 ${out.parentFile?.name ?: "/"}" else "解压失败",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }) {
-                    Text("解压此文件", color = SunColors.Accent, fontSize = 13.sp)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { preview = null }) {
-                    Text("关闭", color = SunColors.TextSecondary, fontSize = 13.sp)
-                }
-            }
-        )
     }
 }
 
@@ -630,98 +754,122 @@ private fun parentPrefix(prefix: String): String {
     return if (idx < 0) "" else prefix.substring(0, idx + 1)
 }
 
-private fun looksTextual(data: ByteArray): Boolean {
-    if (data.isEmpty()) return true
-    var nul = 0
-    for (i in 0 until minOf(data.size, 512)) if (data[i] == 0.toByte()) nul++
-    return nul == 0
-}
-
-private fun hexPreview(data: ByteArray): String {
-    val sb = StringBuilder()
-    val max = minOf(data.size, 1024)
-    var i = 0
-    while (i < max) {
-        sb.append(String.format(Locale.US, "%08X  ", i))
-        val end = minOf(i + 16, max)
-        for (j in i until end) sb.append(String.format(Locale.US, "%02X ", data[j]))
-        for (j in end until i + 16) sb.append("   ")
-        sb.append(' ')
-        for (j in i until end) {
-            val b = data[j].toInt() and 0xff
-            sb.append(if (b in 32..126) b.toChar() else '.')
-        }
-        sb.append('\n')
-        i += 16
-    }
-    return sb.toString()
-}
-
 // ---------------- 视频播放器 ----------------
 
 private fun clock(ms: Int): String {
     val total = (ms / 1000).coerceAtLeast(0)
-    val m = total / 60
-    val s = total % 60
-    return String.format(Locale.US, "%d:%02d", m, s)
+    return String.format(Locale.US, "%d:%02d", total / 60, total % 60)
 }
 
 @Composable
-fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
-    var video by remember { mutableStateOf<VideoView?>(null) }
+fun VideoViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
+    val list = remember(playlist, file) {
+        if (playlist.any { it.absolutePath == file.absolutePath }) playlist else listOf(file)
+    }
+    var index by remember(file) {
+        mutableIntStateOf(list.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0))
+    }
+    var direction by remember { mutableIntStateOf(0) }
+    val current = list.getOrElse(index) { file }
+
+    fun go(delta: Int) {
+        val next = index + delta
+        if (next !in list.indices) return
+        direction = delta
+        index = next
+    }
+
     var playing by remember { mutableStateOf(false) }
     var duration by remember { mutableIntStateOf(0) }
     var position by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<String?>(null) }
     var controls by remember { mutableStateOf(true) }
+    var video by remember { mutableStateOf<VideoView?>(null) }
 
-    // 控制条几秒后自动隐去，只留画面
     LaunchedEffect(controls, playing) {
         if (controls) {
-            delay(3000)
+            delay(3600)
             controls = false
         }
     }
-    LaunchedEffect(playing) {
+    LaunchedEffect(playing, current) {
         while (playing) {
-            position = video?.currentPosition ?: 0
+            position = runCatching { video?.currentPosition ?: 0 }.getOrDefault(0)
             delay(320)
         }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(current) {
+        playing = false
+        duration = 0
+        position = 0
+        failure = null
+        controls = true
         onDispose { runCatching { video?.stopPlayback() } }
     }
 
     OverlayShell(
-        title = file.name,
-        subtitle = Fmt.size(file.length()),
+        title = current.name,
+        subtitle = if (list.size > 1) "${index + 1} / ${list.size}" else Fmt.size(current.length()),
         onClose = onClose,
-        background = Color.Black
+        background = Color.Black,
+        actions = { ShareButton(current) }
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) { detectTapGestures { controls = !controls } }
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setOnPreparedListener { mp ->
-                            duration = mp.duration
-                            mp.isLooping = false
-                            start()
-                            playing = true
-                        }
-                        setOnCompletionListener { playing = false }
-                        setOnErrorListener { _, _, _ ->
-                            failure = "这个视频无法解码"
-                            true
-                        }
-                        setVideoPath(file.absolutePath)
-                        video = this
-                    }
+        Box(Modifier.fillMaxSize()) {
+            AnimatedContent(
+                targetState = current,
+                transitionSpec = {
+                    val dir = if (direction >= 0) 1 else -1
+                    (slideInHorizontally(tween(Motion.Slow, easing = Motion.EaseOut)) { w -> dir * w / 4 } +
+                        fadeIn(tween(Motion.Base))) togetherWith
+                        (slideOutHorizontally(tween(Motion.Slow, easing = Motion.EaseIn)) { w -> -dir * w / 4 } +
+                            fadeOut(tween(Motion.Base)))
                 },
-                modifier = Modifier.fillMaxSize()
+                label = "video"
+            ) { target ->
+                key(target.absolutePath) {
+                    AndroidView(
+                        factory = { ctx ->
+                            VideoView(ctx).apply {
+                                setOnPreparedListener { mp ->
+                                    duration = mp.duration
+                                    mp.isLooping = false
+                                    start()
+                                    playing = true
+                                }
+                                setOnCompletionListener {
+                                    playing = false
+                                    if (index < list.lastIndex) go(1)
+                                }
+                                setOnErrorListener { _, _, _ ->
+                                    failure = "这个视频无法解码"
+                                    true
+                                }
+                                setVideoPath(target.absolutePath)
+                                video = this
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            // 手势层：点按显隐控制条，左右滑动换片
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(current) {
+                        detectTapGestures { controls = !controls }
+                    }
+                    .pointerInput(current) {
+                        var total = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { total = 0f },
+                            onDragEnd = {
+                                if (abs(total) > size.width * 0.16f) go(if (total < 0) 1 else -1)
+                            },
+                            onHorizontalDrag = { _, dx -> total += dx }
+                        )
+                    }
             )
 
             failure?.let {
@@ -733,16 +881,16 @@ fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
                 )
             }
 
-            androidx.compose.animation.AnimatedVisibility(
+            AnimatedVisibility(
                 visible = controls,
-                enter = androidx.compose.animation.fadeIn(tween(160)),
-                exit = androidx.compose.animation.fadeOut(tween(220)),
+                enter = fadeIn(tween(Motion.Fast)),
+                exit = fadeOut(tween(Motion.Base)),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.55f))
+                        .background(Color.Black.copy(alpha = 0.52f))
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -772,7 +920,7 @@ fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
                             value = position.toFloat(),
                             onValueChange = {
                                 position = it.toInt()
-                                video?.seekTo(it.toInt())
+                                runCatching { video?.seekTo(it.toInt()) }
                             },
                             valueRange = 0f..(duration.coerceAtLeast(1)).toFloat(),
                             colors = SliderDefaults.colors(
@@ -780,7 +928,7 @@ fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
                                 activeTrackColor = SunColors.Accent,
                                 inactiveTrackColor = Color.White.copy(alpha = 0.25f)
                             ),
-                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp)
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                         )
                         Text(clock(duration), color = Color.White.copy(alpha = 0.8f), style = NumberStyle)
                     }
@@ -790,141 +938,267 @@ fun VideoViewerOverlay(file: File, onClose: () -> Unit) {
     }
 }
 
-// ---------------- 音频播放器 ----------------
+// ---------------- 音频播放器（底部弹窗，不占满屏） ----------------
 
 @Composable
-fun AudioViewerOverlay(file: File, onClose: () -> Unit) {
+fun AudioSheetOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
+    val list = remember(playlist, file) {
+        if (playlist.any { it.absolutePath == file.absolutePath }) playlist else listOf(file)
+    }
+    var index by remember(file) {
+        mutableIntStateOf(list.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0))
+    }
+    val current = list.getOrElse(index) { file }
+
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember { mutableStateOf(false) }
     var duration by remember { mutableIntStateOf(0) }
     var position by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<String?>(null) }
     var cover by remember { mutableStateOf<Bitmap?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
 
-    LaunchedEffect(file) {
-        cover = withContext(Dispatchers.IO) { embeddedCover(file) }
-    }
-    DisposableEffect(Unit) {
+    BackHandler { onClose() }
+
+    // 换曲：释放上一首，重新准备
+    DisposableEffect(current) {
+        loading = true
+        playing = false
+        position = 0
+        duration = 0
+        failure = null
         val mp = MediaPlayer()
-        runCatching { mp.setDataSource(file.absolutePath) }
+        runCatching { mp.setDataSource(current.absolutePath) }
             .onFailure { failure = it.message ?: "无法播放" }
-        mp.setOnPreparedListener { duration = it.duration }
+        mp.setOnPreparedListener {
+            duration = it.duration
+            loading = false
+            runCatching { it.start() }
+            playing = true
+        }
         mp.setOnErrorListener { _, _, _ ->
             failure = "这个音频无法解码"
+            loading = false
             true
         }
-        mp.setOnCompletionListener { playing = false }
+        mp.setOnCompletionListener {
+            playing = false
+            if (index < list.lastIndex) index += 1
+        }
         runCatching { mp.prepareAsync() }
         player = mp
-        onDispose { runCatching { mp.release() } }
+        onDispose {
+            runCatching {
+                mp.stop()
+                mp.release()
+            }
+        }
     }
-    LaunchedEffect(playing) {
+
+    LaunchedEffect(current) {
+        cover = withContext(Dispatchers.IO) { embeddedCover(current) }
+    }
+    LaunchedEffect(playing, current) {
         while (playing) {
             position = runCatching { player?.currentPosition ?: 0 }.getOrDefault(0)
             delay(300)
         }
     }
 
-    OverlayShell(
-        title = file.name,
-        subtitle = Fmt.size(file.length()),
-        onClose = onClose,
-        background = SunColors.Bg
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(Motion.Base)),
+        exit = fadeOut(tween(Motion.Fast))
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 30.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        Box(Modifier.fillMaxSize()) {
+            // 遮罩：吃掉所有点击与滑动，不关闭；只有关闭按钮与系统返回能退出
             Box(
                 Modifier
-                    .size(210.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                    .background(SunColors.Surface2),
-                contentAlignment = Alignment.Center
-            ) {
-                val bmp = cover
-                if (bmp != null) {
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(
-                        Icons.Outlined.Audiotrack,
-                        null,
-                        tint = SunColors.Accent.copy(alpha = 0.75f),
-                        modifier = Modifier.size(64.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(26.dp))
-            Text(
-                file.nameWithoutExtension,
-                color = SunColors.TextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                failure ?: file.parent?.substringAfterLast('/').orEmpty(),
-                color = if (failure != null) SunColors.Danger else SunColors.TextTertiary,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(Modifier.height(22.dp))
-            Slider(
-                value = position.toFloat(),
-                onValueChange = {
-                    position = it.toInt()
-                    runCatching { player?.seekTo(it.toInt()) }
-                },
-                valueRange = 0f..(duration.coerceAtLeast(1)).toFloat(),
-                colors = SliderDefaults.colors(
-                    thumbColor = SunColors.Accent,
-                    activeTrackColor = SunColors.Accent,
-                    inactiveTrackColor = SunColors.Surface4
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(clock(position), color = SunColors.TextTertiary, style = NumberStyle)
-                Text(clock(duration), color = SunColors.TextTertiary, style = NumberStyle)
-            }
-
-            Spacer(Modifier.height(18.dp))
-            Box(
-                Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(SunColors.Accent)
-                    .clickable(enabled = failure == null) {
-                        val mp = player ?: return@clickable
-                        if (playing) {
-                            runCatching { mp.pause() }
-                            playing = false
-                        } else {
-                            runCatching { mp.start() }
-                            playing = true
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = if (SunColors.dark) 0.62f else 0.42f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { }
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                e.changes.forEach { it.consume() }
+                            }
                         }
-                    },
-                contentAlignment = Alignment.Center
+                    }
+            )
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .background(SunColors.Surface3)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                Icon(
-                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    if (playing) "暂停" else "播放",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SunColors.Surface1),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val bmp = cover
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                Icons.Outlined.Audiotrack,
+                                null,
+                                tint = SunColors.Accent.copy(alpha = 0.8f),
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            current.nameWithoutExtension,
+                            color = SunColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            failure ?: if (list.size > 1) "${index + 1} / ${list.size}" else current.parent?.substringAfterLast('/').orEmpty(),
+                            color = if (failure != null) SunColors.Danger else SunColors.TextTertiary,
+                            fontSize = 9.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            "关闭",
+                            tint = SunColors.TextTertiary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Slider(
+                    value = position.toFloat(),
+                    onValueChange = {
+                        position = it.toInt()
+                        runCatching { player?.seekTo(it.toInt()) }
+                    },
+                    valueRange = 0f..(duration.coerceAtLeast(1)).toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = SunColors.Accent,
+                        activeTrackColor = SunColors.Accent,
+                        inactiveTrackColor = SunColors.Surface1
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(clock(position), color = SunColors.TextTertiary, style = NumberStyle)
+                    Text(clock(duration), color = SunColors.TextTertiary, style = NumberStyle)
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { if (index > 0) index -= 1 },
+                        enabled = index > 0,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ArrowBack,
+                            "上一首",
+                            tint = if (index > 0) SunColors.TextSecondary else SunColors.TextTertiary.copy(alpha = 0.35f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(18.dp))
+                    Box(
+                        Modifier
+                            .size(58.dp)
+                            .clip(CircleShape)
+                            .background(if (failure == null) SunColors.Accent else SunColors.Surface1)
+                            .clickable(enabled = failure == null) {
+                                val mp = player ?: return@clickable
+                                if (playing) {
+                                    runCatching { mp.pause() }
+                                    playing = false
+                                } else {
+                                    runCatching { mp.start() }
+                                    playing = true
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (loading) {
+                            CircularProgressIndicator(
+                                Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (playing) "暂停" else "播放",
+                                tint = Color.White,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(18.dp))
+                    IconButton(
+                        onClick = { if (index < list.lastIndex) index += 1 },
+                        enabled = index < list.lastIndex,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ArrowForward,
+                            "下一首",
+                            tint = if (index < list.lastIndex) SunColors.TextSecondary
+                            else SunColors.TextTertiary.copy(alpha = 0.35f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ShareButton(file: File) {
+    val context = LocalContext.current
+    IconButton(
+        onClick = { shareFile(context, file) },
+        modifier = Modifier.size(40.dp)
+    ) {
+        Icon(
+            Icons.Outlined.Share,
+            "分享",
+            tint = SunColors.TextSecondary,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
