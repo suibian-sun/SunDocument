@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">SunFile</string>
+    <string name="app_name">SunDocument</string>
     <color name="bg">#FF101418</color>
     <color name="accent">#FF2F81F7</color>
 </resources>

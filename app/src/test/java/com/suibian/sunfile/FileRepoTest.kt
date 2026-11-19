@@ -124,6 +124,58 @@ class FileRepoTest {
         assertEquals(1 to 2, FileRepo.countChildren(File(root, "d")))
     }
 
+
+    @Test
+    fun `search finds nested matches and respects limit`() {
+        write(File(root, "a/report.txt"), "x")
+        write(File(root, "a/b/report-final.txt"), "x")
+        write(File(root, "a/b/other.txt"), "x")
+        var progressCalls = 0
+        val hits = FileRepo.search(root, "report", maxResults = 10, onProgress = { _, _ -> progressCalls++ }, cancelled = { false })
+        assertEquals(2, hits.size)
+        assertTrue(hits.all { it.name.contains("report") })
+        assertTrue(progressCalls > 0)
+
+        val limited = FileRepo.search(root, "txt", maxResults = 1, onProgress = { _, _ -> }, cancelled = { false })
+        assertEquals(1, limited.size)
+    }
+
+    @Test
+    fun `looksLikeText distinguishes text and binary`() {
+        val txt = File(root, "note.md")
+        write(txt, "# title")
+        assertTrue(FileRepo.looksLikeText(txt))
+
+        val bin = File(root, "photo.png")
+        bin.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 0, 0, 0))
+        assertFalse(FileRepo.looksLikeText(bin))
+
+        val noExt = File(root, "README")
+        write(noExt, "plain text")
+        assertTrue(FileRepo.looksLikeText(noExt))
+    }
+
+    @Test
+    fun `write and read text roundtrip`() {
+        val f = File(root, "sub/dir/file.txt")
+        FileRepo.writeText(f, "你好\nworld")
+        assertEquals("你好\nworld", FileRepo.readText(f))
+    }
+
+    @Test
+    fun `sort by size and date`() {
+        val small = File(root, "small.txt").apply { writeText("1") }
+        val big = File(root, "big.txt").apply { writeText("1234567890") }
+        small.setLastModified(1_000_000L)
+        big.setLastModified(2_000_000L)
+
+        val bySizeDesc = FileRepo.list(root, false, SortSpec(SortMode.SIZE, false)).map { it.name }
+        assertEquals(listOf("big.txt", "small.txt"), bySizeDesc)
+
+        val byDateAsc = FileRepo.list(root, false, SortSpec(SortMode.DATE, true)).map { it.name }
+        assertEquals(listOf("small.txt", "big.txt"), byDateAsc)
+    }
+
     @Test
     fun `version comparison`() {
         assertTrue(GithubApi.isNewer("1.0.1", "1.0.0"))

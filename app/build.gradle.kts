@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.0.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 1
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.0.1"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 7
 
 android {
     namespace = "com.suibian.sunfile"

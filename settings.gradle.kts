@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SunFile"
+rootProject.name = "SunDocument"
 include(":app")

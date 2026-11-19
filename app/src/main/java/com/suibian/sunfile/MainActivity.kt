@@ -2,10 +2,10 @@ package com.suibian.sunfile
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,8 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import com.suibian.sunfile.ui.FileManagerScreen
-import com.suibian.sunfile.ui.SunFileTheme
+import com.suibian.sunfile.ui.MainScreen
+import com.suibian.sunfile.ui.theme.SunDocumentTheme
 import com.suibian.sunfile.util.Permissions
 
 class MainActivity : ComponentActivity() {
@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
         )
         val activity = this
         setContent {
-            SunFileTheme {
+            SunDocumentTheme {
                 var hasAccess by remember { mutableStateOf(Permissions.hasAllFilesAccess(activity)) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                FileManagerScreen(
+                MainScreen(
                     hasAccess = hasAccess,
                     onRequestAccess = {
                         if (Permissions.needsRuntimeStoragePermission()) {

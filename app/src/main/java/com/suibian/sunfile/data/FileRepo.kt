@@ -205,6 +205,116 @@ object FileRepo {
         delete(src)
     }
 
+
+    // ---------------- 文本读写与搜索 ----------------
+
+    const val MAX_TEXT_BYTES = 3L * 1024 * 1024
+
+    private val TEXT_EXTENSIONS = setOf(
+        "txt", "md", "markdown", "json", "xml", "yml", "yaml", "ini", "conf", "cfg",
+        "properties", "log", "csv", "tsv", "html", "htm", "css", "scss", "js", "mjs",
+        "ts", "jsx", "tsx", "vue", "java", "kt", "kts", "gradle", "groovy", "c", "h",
+        "cpp", "hpp", "cc", "py", "sh", "bash", "zsh", "bat", "ps1", "sql", "toml",
+        "lock", "gitignore", "pro", "rc", "env", "php", "rb", "go", "rs", "swift",
+        "m", "mm", "srt", "vtt", "tex", "asm", "s", "mk", "makefile", "patch", "diff",
+        "smali", "lua", "dart", "r", "pl", "vim", "nginx", "service"
+    )
+
+    /** 判断是否值得用内置编辑器打开：扩展名白名单，或文件头无 NUL 字节 */
+    fun looksLikeText(file: File): Boolean {
+        if (file.isDirectory) return false
+        val ext = file.extension.lowercase()
+        if (ext in TEXT_EXTENSIONS) return true
+        if (file.length() > MAX_TEXT_BYTES) return false
+        if (ext.isNotEmpty()) {
+            // 已知二进制扩展名直接排除
+            if (ext in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "mp3", "mp4", "mkv", "avi",
+                    "zip", "rar", "7z", "gz", "tar", "so", "dex", "jar", "ttf", "otf", "woff", "pdf",
+                    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "db", "sqlite", "bin", "class")
+            ) return false
+        }
+        return runCatching {
+            file.inputStream().use { input ->
+                val buf = ByteArray(4096)
+                val read = input.read(buf)
+                if (read <= 0) return true
+                for (i in 0 until read) if (buf[i] == 0.toByte()) return false
+                true
+            }
+        }.getOrDefault(false)
+    }
+
+    fun readText(file: File): String {
+        if (file.length() > MAX_TEXT_BYTES) {
+            throw IOException("文件超过 ${MAX_TEXT_BYTES / 1024 / 1024}MB，请用其他编辑器打开")
+        }
+        return file.readText()
+    }
+
+    fun writeText(file: File, text: String) {
+        file.parentFile?.let { if (!it.exists()) it.mkdirs() }
+        file.writeText(text)
+    }
+
+    /**
+     * 递归搜索文件名，广度优先，带访问上限与进度回调。
+     */
+    fun search(
+        root: File,
+        query: String,
+        maxResults: Int = 200,
+        onProgress: (scanned: Int, current: String) -> Unit,
+        cancelled: () -> Boolean
+    ): List<FileEntry> {
+        val keyword = query.trim().lowercase()
+        if (keyword.isEmpty()) return emptyList()
+        val results = ArrayList<FileEntry>()
+        val queue = ArrayDeque<File>()
+        queue.addLast(root)
+        var scanned = 0
+        var tick = 0L
+        while (queue.isNotEmpty()) {
+            if (cancelled() || results.size >= maxResults || scanned > 60_000) break
+            val dir = queue.removeFirst()
+            val children = dir.listFiles() ?: continue
+            for (c in children) {
+                scanned++
+                if (c.name.lowercase().contains(keyword)) {
+                    results.add(
+                        FileEntry(
+                            file = c,
+                            name = c.name,
+                            isDir = c.isDirectory,
+                            size = if (c.isDirectory) 0L else c.length(),
+                            lastModified = c.lastModified(),
+                            isHidden = c.name.startsWith("."),
+                            canRead = c.canRead(),
+                            canWrite = c.canWrite()
+                        )
+                    )
+                    if (results.size >= maxResults) break
+                }
+                if (c.isDirectory) queue.addLast(c)
+            }
+            val now = System.currentTimeMillis()
+            if (now - tick > 120) {
+                tick = now
+                onProgress(scanned, dir.absolutePath)
+            }
+        }
+        onProgress(scanned, "")
+        return results
+    }
+
+    /** 把相对路径显示出来（搜索结果用） */
+    fun relativeTo(rootPath: String, childPath: String): String {
+        if (childPath.startsWith(rootPath)) {
+            val rel = childPath.removePrefix(rootPath).removePrefix("/")
+            return if (rel.isEmpty()) childPath else rel
+        }
+        return childPath
+    }
+
     fun isInside(parent: File, child: File): Boolean {
         val p = try { parent.canonicalPath } catch (e: Exception) { parent.absolutePath }
         val c = try { child.canonicalPath } catch (e: Exception) { child.absolutePath }
