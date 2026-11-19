@@ -213,10 +213,6 @@ fun MainScreen(
         vm.messages.collect { snackbarHost.showSnackbar(it) }
     }
 
-    LaunchedEffect(Unit) {
-        editorVm.toast.collect { snackbarHost.showSnackbar(it) }
-    }
-
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(enabled = drawerState.isClosed && page != Page.Files) { page = Page.Files }
     BackHandler(enabled = drawerState.isClosed && page == Page.Files && pane.selectionMode) {

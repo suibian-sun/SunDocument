@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.WrapText
 import androidx.compose.material.icons.outlined.Info
+import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -73,6 +74,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -117,7 +119,12 @@ fun EditorOverlay(
     onClose: () -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        vm.toast.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
     var visible by remember { mutableStateOf(false) }
     var value by remember(file) { mutableStateOf(TextFieldValue("")) }
     var fontSize by remember(file) { mutableIntStateOf(prefs.editorFontSize) }
@@ -428,6 +435,7 @@ fun EditorOverlay(
                 val density = LocalDensity.current
                 val lineHpx = with(density) { lineHeight.toPx() }
                 val viewportPx = with(density) { maxHeight.toPx() }
+                val viewportDp = maxHeight
                 val vScroll = rememberScrollState()
                 val hScroll = rememberScrollState()
 
@@ -505,9 +513,10 @@ fun EditorOverlay(
                                     keyboardType = KeyboardType.Text,
                                     imeAction = ImeAction.Default
                                 ),
-                                // 超长单行文本限制最大宽度，避免水平滚动容器申请超大尺寸
+                                // 超长单行文本限制最大宽度；最小高度铺满视口，点空白处也能聚焦
                                 modifier = Modifier
                                     .widthIn(max = 8000.dp)
+                                    .heightIn(min = (viewportDp - 16.dp).coerceAtLeast(40.dp))
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             )
                         }
