@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -504,7 +505,10 @@ fun EditorOverlay(
                                     keyboardType = KeyboardType.Text,
                                     imeAction = ImeAction.Default
                                 ),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                // 超长单行文本限制最大宽度，避免水平滚动容器申请超大尺寸
+                                modifier = Modifier
+                                    .widthIn(max = 8000.dp)
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
                             )
                         }
                     }

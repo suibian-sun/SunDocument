@@ -443,7 +443,9 @@ fun OpenWithSheet(
     onPickAndRemember: (OpenMode) -> Unit
 ) {
     var remember by remember { mutableStateOf(false) }
-    val ext = FileKinds.extensionOf(file).ifEmpty { "无扩展名" }
+    val rawExt = FileKinds.extensionOf(file)
+    val ext = rawExt.ifEmpty { "无扩展名" }
+    val extLabel = if (rawExt.isEmpty()) "" else ".$rawExt"
     val modes = buildList {
         add(OpenMode.TEXT)
         add(OpenMode.HEX)
@@ -460,7 +462,8 @@ fun OpenWithSheet(
                 fontWeight = FontWeight.Medium
             )
             Text(
-                "${file.name} · .$ext" + if (remembered != null) " · 当前默认：${remembered.label}" else "",
+                "${file.name} · $extLabel" .trimEnd(' ', '·') +
+                    if (remembered != null) " · 当前默认：${remembered.label}" else "",
                 color = SunColors.TextTertiary,
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -510,7 +513,7 @@ fun OpenWithSheet(
                 )
             )
             Text(
-                "总是用此方式打开 .$ext",
+                if (rawExt.isEmpty()) "总是用此方式打开无扩展名文件" else "总是用此方式打开 .$rawExt",
                 color = SunColors.TextSecondary,
                 fontSize = 11.5.sp
             )
