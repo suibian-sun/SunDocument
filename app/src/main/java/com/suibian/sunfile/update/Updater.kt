@@ -82,7 +82,10 @@ object GithubApi {
      * 比较版本号，remote 比 local 新时返回 true
      */
     fun isNewer(remote: String, local: String): Boolean {
-        fun parts(v: String) = v.trim().trimStart('v', 'V').split('.', '-', '+')
+        // 忽略构建元数据（+ci.3）与预发布后缀，只比较主版本号
+        fun parts(v: String) = v.trim().trimStart('v', 'V')
+            .substringBefore('+').substringBefore('-')
+            .split('.')
             .map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
         val a = parts(remote)
         val b = parts(local)

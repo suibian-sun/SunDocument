@@ -48,6 +48,9 @@ jobs:
             echo "::warning::KEYSTORE_BASE64 未配置，本次构建将使用 debug 签名（无法覆盖安装正式版）"
           fi
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
       - name: Build release APK
         env:
           SIGNING_KEYSTORE: ${{ github.workspace }}/keystore/release.jks
