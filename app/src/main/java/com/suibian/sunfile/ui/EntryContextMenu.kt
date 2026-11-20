@@ -63,11 +63,11 @@ fun EntryActionMenu(
 ) {
     val density = LocalDensity.current
     val config = LocalConfiguration.current
-    val widthDp = 212.dp
+    val widthDp = 224.dp
     val widthPx = with(density) { widthDp.toPx() }
     val screenW = with(density) { config.screenWidthDp.dp.toPx() }
     val screenH = with(density) { config.screenHeightDp.dp.toPx() }
-    val estimated = with(density) { (56 + actions.size * 40 + 12).dp.toPx() }
+    val estimated = with(density) { (58 + actions.size * 46 + 10).dp.toPx() }
 
     val x = anchor.x.roundToInt().coerceIn(with(density) { 6.dp.toPx() }.toInt(),
         (screenW - widthPx - with(density) { 6.dp.toPx() }).toInt().coerceAtLeast(0))
@@ -87,8 +87,8 @@ fun EntryActionMenu(
             Modifier
                 .width(widthDp)
                 .heightIn(max = 440.dp)
-                .shadow(18.dp, SunShapes.Large)
-                .clip(SunShapes.Large)
+                .shadow(16.dp, SunShapes.Dialog)
+                .clip(SunShapes.Dialog)
                 .background(SunColors.Surface4)
                 .padding(vertical = 6.dp)
         ) {
@@ -96,13 +96,13 @@ fun EntryActionMenu(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FileTypeBadge(entry.file, entry.isDir, 26.dp)
-                Spacer(Modifier.width(10.dp))
+                FileTypeBadge(entry.file, entry.isDir, 30.dp)
+                Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         entry.name,
                         color = SunColors.TextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -110,7 +110,7 @@ fun EntryActionMenu(
                     Text(
                         if (entry.isDir) "文件夹" else Fmt.size(entry.size),
                         color = SunColors.TextTertiary,
-                        fontSize = 9.sp
+                        fontSize = 10.sp
                     )
                 }
             }
@@ -120,7 +120,7 @@ fun EntryActionMenu(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .height(40.dp)
+                            .height(46.dp)
                             .clickable {
                                 onDismiss()
                                 action.onClick()
@@ -132,17 +132,17 @@ fun EntryActionMenu(
                             action.icon,
                             null,
                             tint = if (action.danger) SunColors.Danger else SunColors.TextSecondary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(11.dp))
                         Text(
                             action.label,
                             color = if (action.danger) SunColors.Danger else SunColors.TextPrimary,
-                            fontSize = 12.5.sp,
+                            fontSize = 14.sp,
                             modifier = Modifier.weight(1f)
                         )
                         if (action.hint != null) {
-                            Text(action.hint, color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                            Text(action.hint, color = SunColors.TextTertiary, fontSize = 10.sp)
                         }
                     }
                 }

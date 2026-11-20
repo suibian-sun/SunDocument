@@ -70,15 +70,16 @@ data class SunPalette(
 
 val DarkPalette = SunPalette(
     dark = true,
-    Bg = Color(0xFF08090C),
-    Surface1 = Color(0xFF101318),
-    Surface2 = Color(0xFF161B21),
-    Surface3 = Color(0xFF1B2128),
-    Surface4 = Color(0xFF212830),
-    Hairline = Color(0xFF242B33),
-    TextPrimary = Color(0xFFE9EEF4),
-    TextSecondary = Color(0xFF9BA5B1),
-    TextTertiary = Color(0xFF6A7480),
+    // 中性灰阶：MT 的深色就是「同一支灰，只换明度」，不掺蓝紫
+    Bg = Color(0xFF0D0D0D),
+    Surface1 = Color(0xFF171717),
+    Surface2 = Color(0xFF1F1F1F),
+    Surface3 = Color(0xFF262626),
+    Surface4 = Color(0xFF2E2E2E),
+    Hairline = Color(0xFF343434),
+    TextPrimary = Color(0xFFECECEC),
+    TextSecondary = Color(0xFFA3A3A3),
+    TextTertiary = Color(0xFF7E7E7E),
     Accent = Color(0xFF4C8DFF),
     AccentSoft = Color(0x264C8DFF),
     AccentLine = Color(0xFF2A5FAF),
@@ -98,15 +99,15 @@ val DarkPalette = SunPalette(
 
 val LightPalette = SunPalette(
     dark = false,
-    Bg = Color(0xFFF1F2F4),
+    Bg = Color(0xFFF2F2F2),
     Surface1 = Color(0xFFFFFFFF),
-    Surface2 = Color(0xFFEBEDF1),
-    Surface3 = Color(0xFFE2E5EA),
+    Surface2 = Color(0xFFECECEC),
+    Surface3 = Color(0xFFE3E3E3),
     Surface4 = Color(0xFFFFFFFF),
-    Hairline = Color(0xFFDCE0E5),
-    TextPrimary = Color(0xFF14171B),
-    TextSecondary = Color(0xFF58626C),
-    TextTertiary = Color(0xFF8A949E),
+    Hairline = Color(0xFFDCDCDC),
+    TextPrimary = Color(0xFF141414),
+    TextSecondary = Color(0xFF5C5C5C),
+    TextTertiary = Color(0xFF767676),
     Accent = Color(0xFF1F6FEB),
     AccentSoft = Color(0x1A1F6FEB),
     AccentLine = Color(0xFF9DBAF3),
@@ -173,6 +174,42 @@ object SunShapes {
     val Large = RoundedCornerShape(20.dp)
     val Sheet = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     val Pill = RoundedCornerShape(50)
+
+    /** MT 的弹窗几乎是直角，只有 2dp 的收边 */
+    val Dialog = RoundedCornerShape(3.dp)
+    /** 打开方式里的彩色方块 */
+    val Tile = RoundedCornerShape(15.dp)
+}
+
+/**
+ * MT 管理器的基础度量。
+ *
+ * 文件列表、顶栏、底栏、全屏页共用同一套数字：一旦各页面自己写字号，
+ * 半栏宽度下就会出现「标题不如正文醒目」的错位，所以这里集中一次。
+ */
+object Mt {
+    val BarHeight = 56.dp
+    val BottomHeight = 50.dp
+    val RowHeight = 50.dp
+    val RowIcon = 30.dp
+    val RowGutter = 12.dp
+
+    /** 顶栏主标题：路径本身就是这一页的名字 */
+    val Title = 17.sp
+    /** 顶栏副标题：文件夹数 / 文件数 / 存储 */
+    val BarMeta = 10.5.sp
+    /** 列表行主文字 */
+    val Name = 14.sp
+    /** 列表行元信息（时间、大小） */
+    val Meta = 10.sp
+
+    /** 路径越长标题越小，保证深路径也能读到尾部目录名 */
+    fun titleSize(length: Int): androidx.compose.ui.unit.TextUnit = when {
+        length <= 22 -> 17.sp
+        length <= 30 -> 15.sp
+        length <= 40 -> 13.sp
+        else -> 12.sp
+    }
 }
 
 private val SunTypography = Typography(

@@ -12,7 +12,7 @@ object Fmt {
         override fun initialValue() = SimpleDateFormat(PATTERN, Locale.getDefault())
     }
     private val shortTime = object : ThreadLocal<SimpleDateFormat>() {
-        override fun initialValue() = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        override fun initialValue() = SimpleDateFormat("yy-MM-dd HH:mm", Locale.getDefault())
     }
 
     /** 文件大小：统一保留两位小数，符合"精确到 0.01"的要求 */
@@ -27,6 +27,27 @@ object Fmt {
             i++
         }
         return String.format(Locale.US, "%.2f %s", v, units[i])
+    }
+
+    /**
+     * 列表用紧凑大小：不带空格、按量级选精度（18.74M / 2.9G）。
+     * 双栏半屏只有 130dp 左右，这样时间与大小才能挤进同一行。
+     */
+    fun sizeCompact(bytes: Long): String {
+        if (bytes < 0) return "-"
+        if (bytes < 1024) return "$bytes B"
+        val units = arrayOf("K", "M", "G", "T", "P")
+        var v = bytes.toDouble() / 1024.0
+        var i = 0
+        while (v >= 1024 && i < units.size - 1) {
+            v /= 1024.0
+            i++
+        }
+        return when {
+            v >= 100 -> String.format(Locale.US, "%.0f%s", v, units[i])
+            v >= 10 -> String.format(Locale.US, "%.1f%s", v, units[i])
+            else -> String.format(Locale.US, "%.2f%s", v, units[i])
+        }
     }
 
     /** 保留两位小数的存储占用，如 "36.24 GB / 128.00 GB" */

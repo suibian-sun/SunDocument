@@ -26,12 +26,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -223,48 +225,55 @@ private fun ThumbBadge(file: File, isVideo: Boolean, size: Dp, modifier: Modifie
     }
 }
 
-/** 纸张轮廓 + 折角 + 居中标签（纯 Canvas 绘制，零布局开销） */
+/**
+ * 文件图标：MT 的底是「整块彩色圆角方」，上面压一张白纸，
+ * 扩展名用底色写在纸上。方块比纸张更容易在密集列表里被眼睛抓住，
+ * 颜色又能在不看文字时区分类型。
+ */
 @Composable
 private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Modifier) {
-    val ink = Color.White
-    val foldAlpha = 0.30f
     Canvas(modifier) {
         val w = size.width
         val h = size.height
-        val left = w * 0.16f
-        val right = w * 0.84f
-        val top = h * 0.07f
-        val bottom = h * 0.93f
-        val fold = (right - left) * 0.34f
+        drawRoundRect(
+            color = color,
+            cornerRadius = CornerRadius(w * 0.23f, w * 0.23f)
+        )
+
+        val left = w * 0.255f
+        val right = w * 0.745f
+        val top = h * 0.145f
+        val bottom = h * 0.855f
+        val fold = (right - left) * 0.36f
 
         val page = Path().apply {
-            moveTo(left, top + h * 0.04f)
+            moveTo(left, top)
             lineTo(right - fold, top)
-            lineTo(right, top + fold * 0.86f)
-            lineTo(right, bottom - h * 0.04f)
-            lineTo(left, bottom - h * 0.04f)
+            lineTo(right, top + fold)
+            lineTo(right, bottom)
+            lineTo(left, bottom)
             close()
         }
-        drawPath(page, color)
-
-        // 折角：用一层半透明白色表示纸被翻起
-        val corner = Path().apply {
-            moveTo(right - fold, top)
-            lineTo(right - fold, top + fold * 0.86f)
-            lineTo(right, top + fold * 0.86f)
-            close()
-        }
-        drawPath(corner, Color.White.copy(alpha = foldAlpha))
+        drawPath(page, Color.White.copy(alpha = 0.95f))
+        // 折角：用底色透出来，像纸被翻起
+        drawPath(
+            Path().apply {
+                moveTo(right - fold, top)
+                lineTo(right - fold, top + fold)
+                lineTo(right, top + fold)
+                close()
+            },
+            color.copy(alpha = 0.24f)
+        )
 
         if (dotted) {
-            val stroke = h * 0.055f
-            val lineColor = ink.copy(alpha = 0.82f)
+            val stroke = h * 0.048f
             for (i in 0..2) {
-                val y = top + h * (0.40f + i * 0.17f)
+                val y = top + h * (0.235f + i * 0.125f)
                 drawLine(
-                    color = lineColor,
-                    start = Offset(left + w * 0.13f, y),
-                    end = Offset(right - w * (if (i == 2) 0.28f else 0.13f), y),
+                    color = color.copy(alpha = 0.78f),
+                    start = Offset(left + w * 0.05f, y),
+                    end = Offset(right - w * (if (i == 2) 0.10f else 0.05f), y),
                     strokeWidth = stroke,
                     cap = StrokeCap.Round
                 )
@@ -273,18 +282,17 @@ private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Mo
         }
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            this.color = android.graphics.Color.WHITE
+            typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+            this.color = color.toArgb()
             textAlign = Paint.Align.CENTER
             textSize = when (label.length) {
-                1 -> w * 0.40f
-                2 -> w * 0.34f
-                3 -> w * 0.27f
-                else -> w * 0.215f
+                1 -> w * 0.30f
+                2 -> w * 0.26f
+                3 -> w * 0.205f
+                else -> w * 0.165f
             }
         }
-        // 底部留白比顶部多一点，视觉重心才稳
-        val baseline = bottom - h * 0.14f
+        val baseline = bottom - h * 0.115f
         drawContext.canvas.nativeCanvas.drawText(label, w * 0.5f, baseline, paint)
     }
 }

@@ -82,18 +82,18 @@ fun SettingsPage(
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(58.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
+                    tint = SunColors.TextPrimary,
+                    modifier = Modifier.size(21.dp)
                 )
             }
-            Text("设置", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text("设置", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
         }
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -172,9 +172,9 @@ private fun SectionTitle(text: String) {
     Text(
         text,
         color = SunColors.TextTertiary,
-        fontSize = 9.5.sp,
-        letterSpacing = 0.8.sp,
-        modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp)
+        fontSize = 10.5.sp,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 7.dp)
     )
 }
 
@@ -184,12 +184,12 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onToggl
         Modifier
             .fillMaxWidth()
             .clickable { onToggle() }
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = SunColors.TextPrimary, fontSize = 13.sp)
-            Text(subtitle, color = SunColors.TextTertiary, fontSize = 9.5.sp)
+            Text(title, color = SunColors.TextPrimary, fontSize = 14.5.sp)
+            Text(subtitle, color = SunColors.TextTertiary, fontSize = 10.5.sp)
         }
         Switch(
             checked = checked,
@@ -214,21 +214,15 @@ private fun ValueRow(title: String, value: String, onClick: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = SunColors.TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(title, color = SunColors.TextPrimary, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
         Text(
             value,
             color = SunColors.TextTertiary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
             textAlign = androidx.compose.ui.text.style.TextAlign.End
-        )
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            null,
-            tint = SunColors.TextTertiary,
-            modifier = Modifier.size(16.dp)
         )
     }
 }
@@ -275,7 +269,7 @@ fun UpdateDialog(
                     else -> "检查更新"
                 },
                 color = SunColors.TextPrimary,
-                fontSize = 15.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Medium
             )
         },

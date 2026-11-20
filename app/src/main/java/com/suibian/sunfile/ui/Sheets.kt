@@ -77,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -155,7 +156,7 @@ fun NewSheet(onDismiss: () -> Unit, onFolder: () -> Unit, onFile: () -> Unit) {
         Text(
             "新建",
             color = SunColors.TextPrimary,
-            fontSize = 15.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 20.dp, bottom = 14.dp)
         )
@@ -204,7 +205,7 @@ fun SortSheet(
         Text(
             "排序方式",
             color = SunColors.TextPrimary,
-            fontSize = 15.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 20.dp, bottom = 8.dp)
         )
@@ -353,7 +354,7 @@ fun PathSheet(
         Text(
             "跳转路径",
             color = SunColors.TextPrimary,
-            fontSize = 15.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 20.dp, bottom = 12.dp)
         )
@@ -406,7 +407,7 @@ fun BookmarkSheet(
         Text(
             "收藏路径",
             color = SunColors.TextPrimary,
-            fontSize = 15.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 20.dp, bottom = 10.dp)
         )
@@ -460,7 +461,12 @@ fun BookmarkSheet(
     }
 }
 
-/** 打开方式选择：仿 MT 的弹窗，长按某项即可设为该类型的默认方式 */
+/**
+ * 打开方式选择。
+ *
+ * 结构照 MT：居中直角卡片、三列彩色方块、底部左「类型」右「关闭」。
+ * 方块比列表行更容易在拇指区一次点中，也把「这是什么」交给图标本身回答。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OpenWithSheet(
@@ -474,7 +480,6 @@ fun OpenWithSheet(
 ) {
     var remember by remember { mutableStateOf(false) }
     val rawExt = FileKinds.extensionOf(file)
-    val extLabel = if (rawExt.isEmpty()) "" else ".$rawExt"
     val kind = FileKinds.kindOf(file)
     val modes = buildList {
         add(OpenMode.TEXT)
@@ -495,97 +500,177 @@ fun OpenWithSheet(
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
         add(OpenMode.EXTERNAL)
     }
-    Sheet(onDismiss) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.94f)
+                .clip(SunShapes.Dialog)
+                .background(SunColors.Surface4)
+                .navigationBarsPadding()
         ) {
-            Column(Modifier.weight(1f)) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, top = 16.dp, end = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    "打开方式",
+                    "打开方式…",
                     color = SunColors.TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Normal,
+                    letterSpacing = 0.sp
                 )
+                Spacer(Modifier.weight(1f))
                 Text(
-                    file.name + (if (remembered != null) " · 默认：${remembered.label}" else ""),
-                    color = SunColors.TextTertiary,
-                    fontSize = 9.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    "管理",
+                    color = SunColors.Accent,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { onManage() }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
                 )
             }
             Text(
-                "管理",
-                color = SunColors.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier
-                    .clip(SunShapes.Small)
-                    .clickable { onManage() }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                file.name + if (remembered != null) "  ·  默认 ${remembered.label}" else "",
+                color = SunColors.TextTertiary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 20.dp, top = 2.dp, end = 20.dp)
             )
-        }
-        Spacer(Modifier.height(6.dp))
-        modes.forEach { mode ->
-            val isDefault = remembered == mode
+            Spacer(Modifier.height(10.dp))
+
+            modes.chunked(3).forEach { line ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+                    line.forEach { mode ->
+                        OpenModeTile(
+                            mode = mode,
+                            isDefault = remembered == mode,
+                            modifier = Modifier.weight(1f),
+                            onClick = { if (remember) onPickAndRemember(mode) else onPick(mode) },
+                            onLongClick = { onSetDefault(mode) }
+                        )
+                    }
+                    repeat(3 - line.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .combinedClickable(
-                        onLongClick = { onSetDefault(mode) },
-                        onClick = { if (remember) onPickAndRemember(mode) else onPick(mode) }
-                    )
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .clickable { remember = !remember }
+                    .padding(start = 16.dp, end = 20.dp, top = 4.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    modeIcon(mode),
-                    null,
-                    tint = if (isDefault) SunColors.Accent else SunColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        mode.label,
-                        color = if (isDefault) SunColors.Accent else SunColors.TextPrimary,
-                        fontSize = 13.sp
+                Checkbox(
+                    checked = remember,
+                    onCheckedChange = { remember = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = SunColors.Accent,
+                        uncheckedColor = SunColors.TextTertiary
                     )
-                    Text(modeHint(mode), color = SunColors.TextTertiary, fontSize = 9.sp)
-                }
-                if (isDefault) {
-                    Icon(Icons.Default.Check, null, tint = SunColors.Accent, modifier = Modifier.size(16.dp))
-                }
+                )
+                Text(
+                    if (rawExt.isEmpty()) "总是用此方式打开无扩展名文件" else "总是用此方式打开 .$rawExt",
+                    color = SunColors.TextSecondary,
+                    fontSize = 11.5.sp
+                )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "类型",
+                    color = SunColors.Accent,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { onManage() }
+                        .padding(horizontal = 2.dp, vertical = 6.dp)
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "关闭",
+                    color = SunColors.Accent,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 2.dp, vertical = 6.dp)
+                )
             }
         }
-        Row(
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun OpenModeTile(
+    mode: OpenMode,
+    isDefault: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    Column(
+        modifier
+            .clip(SunShapes.Small)
+            .combinedClickable(onLongClick = onLongClick, onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
             Modifier
-                .fillMaxWidth()
-                .clickable { remember = !remember }
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(54.dp)
+                .clip(SunShapes.Tile)
+                .background(modeColor(mode)),
+            contentAlignment = Alignment.Center
         ) {
-            Checkbox(
-                checked = remember,
-                onCheckedChange = { remember = it },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = SunColors.Accent,
-                    uncheckedColor = SunColors.TextTertiary
-                )
-            )
-            Text(
-                if (rawExt.isEmpty()) "总是用此方式打开无扩展名文件" else "总是用此方式打开 .$rawExt",
-                color = SunColors.TextSecondary,
-                fontSize = 11.5.sp
+            Icon(
+                modeIcon(mode),
+                null,
+                tint = Color.White,
+                modifier = Modifier.size(26.dp)
             )
         }
+        Spacer(Modifier.height(7.dp))
         Text(
-            "长按任意方式可直接设为 .${rawExt.ifEmpty { "无扩展名" }} 的默认",
+            mode.label,
+            color = if (isDefault) SunColors.Accent else SunColors.TextPrimary,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            if (isDefault) "默认" else modeHint(mode).substringBefore(" / "),
             color = SunColors.TextTertiary,
-            fontSize = 9.sp,
-            modifier = Modifier.padding(start = 20.dp, bottom = 8.dp)
+            fontSize = 8.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp)
         )
     }
+}
+
+/** MT 的每个功能方块都有自己的颜色，这里按用途分组取色 */
+private fun modeColor(mode: OpenMode): Color = when (mode) {
+    OpenMode.TEXT -> Color(0xFF2F6FD0)
+    OpenMode.HEX -> Color(0xFF5B8A91)
+    OpenMode.IMAGE -> Color(0xFF2AA79B)
+    OpenMode.AUDIO -> Color(0xFFDE474E)
+    OpenMode.VIDEO -> Color(0xFF7A5BD3)
+    OpenMode.DOCUMENT -> Color(0xFF3B72C4)
+    OpenMode.ARCHIVE -> Color(0xFF8B5E3C)
+    OpenMode.AXML -> Color(0xFF2E8B8B)
+    OpenMode.DEX -> Color(0xFF4F8F8A)
+    OpenMode.INFO -> Color(0xFF3FA45B)
+    OpenMode.EXTERNAL -> Color(0xFF566573)
 }
 
 /** 默认打开方式管理：列出已记住的类型，可逐条删除或全部清除 */
@@ -602,7 +687,7 @@ fun OpenWithManagerSheet(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("默认打开方式", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text("默认打开方式", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                 Text(
                     if (mapping.isEmpty()) "还没有为任何类型指定默认方式" else "${mapping.size} 个类型已指定",
                     color = SunColors.TextTertiary,
@@ -740,7 +825,7 @@ fun InputDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text(title, color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text(title, color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
                 SunTextField(
@@ -782,7 +867,7 @@ fun ConfirmDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text(title, color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text(title, color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Text(
                 message,
@@ -816,7 +901,7 @@ fun PropertiesDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("属性", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("属性", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
                 if (props.isEmpty()) {
@@ -864,7 +949,7 @@ fun CompressDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("压缩 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("压缩 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -932,7 +1017,7 @@ fun BatchRenameDialog(
         shape = SunShapes.Medium,
         title = {
             Column {
-                Text("批量重命名 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text("批量重命名 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                 Text("表达式决定新文件名，{P} 原名、{S} 后缀、{1} 递增", color = SunColors.TextTertiary, fontSize = 9.5.sp)
             }
         },
@@ -1006,7 +1091,7 @@ fun ChecksumDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("校验和", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("校验和", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
                 Text(file.name, color = SunColors.TextTertiary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1131,7 +1216,7 @@ fun ApkSheet(file: File, onDismiss: () -> Unit) {
                 Text(
                     m.label,
                     color = SunColors.TextPrimary,
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1202,7 +1287,7 @@ fun ChmodDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("修改权限", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("修改权限", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
                 Text(

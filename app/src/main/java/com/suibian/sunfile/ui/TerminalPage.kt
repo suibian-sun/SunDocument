@@ -123,19 +123,19 @@ fun TerminalPage(onBack: () -> Unit) {
             .imePadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(54.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
+                    tint = SunColors.TextPrimary,
+                    modifier = Modifier.size(21.dp)
                 )
             }
             Column(Modifier.weight(1f)) {
-                Text("终端", color = SunColors.TextPrimary, fontSize = 12.5.sp)
+                Text("终端", color = SunColors.TextPrimary, fontSize = 16.5.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
                 Text(
                     cwd,
                     color = SunColors.TextTertiary,

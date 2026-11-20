@@ -93,39 +93,40 @@ fun DocumentViewerOverlay(file: File, onClose: () -> Unit, onOpenExternal: (File
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(54.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onClose, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
+                    tint = SunColors.TextPrimary,
+                    modifier = Modifier.size(21.dp)
                 )
             }
             Column(Modifier.weight(1f)) {
                 Text(
                     file.name,
                     color = SunColors.TextPrimary,
-                    fontSize = 12.5.sp,
+                    fontSize = 16.5.sp,
                     fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.sp,
+                    lineHeight = 20.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     content?.meta ?: Fmt.size(file.length()),
                     color = SunColors.TextTertiary,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace
+                    fontSize = 10.sp
                 )
             }
-            IconButton(onClick = { onOpenExternal(file) }, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = { onOpenExternal(file) }, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.Outlined.OpenInNew,
                     "用其他应用打开",
-                    tint = SunColors.TextTertiary,
-                    modifier = Modifier.size(17.dp)
+                    tint = SunColors.TextSecondary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }

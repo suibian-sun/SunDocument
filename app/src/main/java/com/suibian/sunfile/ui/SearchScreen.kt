@@ -62,15 +62,15 @@ fun SearchPage(
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(62.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextSecondary,
-                    modifier = Modifier.size(19.dp)
+                    tint = SunColors.TextPrimary,
+                    modifier = Modifier.size(21.dp)
                 )
             }
             SunTextField(

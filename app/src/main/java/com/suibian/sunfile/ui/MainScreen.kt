@@ -119,6 +119,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -148,6 +149,7 @@ import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.ui.components.DrawCheck
 import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
+import com.suibian.sunfile.ui.components.MtFolderIcon
 import com.suibian.sunfile.ui.components.RollingNumber
 import com.suibian.sunfile.ui.components.ShimmerList
 import com.suibian.sunfile.ui.components.FileTypeBadge
@@ -155,6 +157,7 @@ import com.suibian.sunfile.ui.components.iconOf
 import com.suibian.sunfile.ui.components.pressScale
 import com.suibian.sunfile.ui.components.tintOf
 import com.suibian.sunfile.ui.theme.Motion
+import com.suibian.sunfile.ui.theme.Mt
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
@@ -1163,7 +1166,7 @@ private fun FilesPage(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(30.dp)
+                    .height(32.dp)
                     .background(SunColors.AccentSoft)
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1171,13 +1174,13 @@ private fun FilesPage(
                 Text(
                     "过滤  ${pane.filter}",
                     color = SunColors.Accent,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Text("${pane.entries.size} 项", color = SunColors.TextTertiary, fontSize = 9.sp)
+                Text("${pane.entries.size} 项", color = SunColors.TextTertiary, fontSize = 10.sp)
                 Icon(
                     Icons.Outlined.Close,
                     "清除过滤",
@@ -1294,20 +1297,30 @@ private fun TopBar(
     onToggleBookmark: (String) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val hairline = SunColors.Hairline
     Row(
         Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(Mt.BarHeight)
             .background(SunColors.Surface1)
+            .drawBehind {
+                val stroke = 0.6.dp.toPx()
+                drawLine(
+                    hairline,
+                    Offset(0f, size.height - stroke / 2),
+                    Offset(size.width, size.height - stroke / 2),
+                    stroke
+                )
+            }
             .padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
             onClick = onOpenDrawer,
             interactionSource = interaction,
-            modifier = Modifier.size(42.dp).pressScale(interaction, 0.88f)
+            modifier = Modifier.size(46.dp).pressScale(interaction, 0.88f)
         ) {
-            HamburgerIcon(open = drawerOpen, tint = SunColors.TextSecondary, modifier = Modifier.size(20.dp))
+            HamburgerIcon(open = drawerOpen, tint = SunColors.TextPrimary, modifier = Modifier.size(22.dp))
         }
 
         Column(
@@ -1315,7 +1328,7 @@ private fun TopBar(
                 .weight(1f)
                 .clip(SunShapes.Small)
                 .clickable { onPathClick() }
-                .padding(horizontal = 2.dp, vertical = 3.dp)
+                .padding(horizontal = 2.dp, vertical = 4.dp)
         ) {
             AnimatedContent(
                 targetState = pane.path,
@@ -1325,51 +1338,36 @@ private fun TopBar(
                 },
                 label = "path"
             ) { path ->
+                val shown = path.ifEmpty { "/" }
                 Text(
-                    path.ifEmpty { "/" },
+                    shown,
                     color = SunColors.TextPrimary,
-                    fontSize = 10.5.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontSize = Mt.titleSize(shown.length),
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.sp,
+                    lineHeight = 20.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Folder,
-                    null,
-                    tint = SunColors.Folder.copy(alpha = 0.75f),
-                    modifier = Modifier.size(10.dp)
-                )
-                Spacer(Modifier.width(3.dp))
-                RollingNumber(pane.dirCount, NumberStyle, SunColors.TextTertiary)
-                Spacer(Modifier.width(9.dp))
-                Icon(
-                    Icons.Outlined.Description,
-                    null,
-                    tint = SunColors.File.copy(alpha = 0.75f),
-                    modifier = Modifier.size(10.dp)
-                )
-                Spacer(Modifier.width(3.dp))
-                RollingNumber(pane.fileCount, NumberStyle, SunColors.TextTertiary)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    Fmt.sizePair(storageUsed, storageTotal),
-                    style = NumberStyle,
-                    color = SunColors.TextTertiary,
-                    maxLines = 1
-                )
-            }
+            Spacer(Modifier.height(1.dp))
+            // MT 的副标题就是一行纯文字，不挂图标，读起来更快
+            Text(
+                "${pane.dirCount} 文件夹 · ${pane.fileCount} 文件 · ${Fmt.sizeCompact(storageUsed)}/${Fmt.sizeCompact(storageTotal)}",
+                color = SunColors.TextTertiary,
+                fontSize = Mt.BarMeta,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         Box {
-            IconButton(onClick = { onOverflowChange(true) }, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = { onOverflowChange(true) }, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.Outlined.MoreVert,
                     contentDescription = "工具栏",
-                    tint = SunColors.TextSecondary,
-                    modifier = Modifier.size(20.dp)
+                    tint = SunColors.TextPrimary,
+                    modifier = Modifier.size(21.dp)
                 )
             }
             DropdownMenu(
@@ -1518,7 +1516,7 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
  */
 @Composable
 private fun PaneDivider() {
-    Box(Modifier.width(1.dp).fillMaxHeight().background(SunColors.Hairline.copy(alpha = 0.7f)))
+    Box(Modifier.width(1.dp).fillMaxHeight().background(SunColors.Hairline))
 }
 
 @Composable
@@ -1594,8 +1592,7 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(38.dp)
-            .background(SunColors.Surface2.copy(alpha = 0.5f))
+            .height(46.dp)
             .pressScale(interaction, 0.99f)
             .clickable(
                 interactionSource = interaction,
@@ -1605,16 +1602,15 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FolderDotsIcon(
-            tint = if (enabled) SunColors.Folder else SunColors.Folder.copy(alpha = 0.35f),
-            modifier = Modifier.size(18.dp)
+        MtFolderIcon(
+            modifier = Modifier.size(28.dp),
+            tint = if (enabled) SunColors.Folder else SunColors.Folder.copy(alpha = 0.35f)
         )
-        Spacer(Modifier.width(9.dp))
+        Spacer(Modifier.width(13.dp))
         Text(
             "..",
-            color = if (enabled) SunColors.TextSecondary else SunColors.TextTertiary.copy(alpha = 0.5f),
-            fontSize = 11.5.sp,
-            fontFamily = FontFamily.Monospace
+            color = if (enabled) SunColors.TextPrimary else SunColors.TextTertiary.copy(alpha = 0.5f),
+            fontSize = Mt.Name
         )
     }
 }
@@ -1729,20 +1725,20 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("打开失败", color = SunColors.TextSecondary, fontSize = 12.sp)
-                Spacer(Modifier.height(5.dp))
+                Text("打开失败", color = SunColors.TextSecondary, fontSize = 13.5.sp)
+                Spacer(Modifier.height(6.dp))
                 Text(
                     pane.error ?: "",
                     color = SunColors.TextTertiary,
-                    fontSize = 9.sp,
-                    lineHeight = 13.sp,
+                    fontSize = 10.5.sp,
+                    lineHeight = 15.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "重试",
                     color = SunColors.Accent,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier
                         .clip(SunShapes.Small)
                         .clickable { onRetry() }
@@ -1755,9 +1751,9 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(36.dp))
-                Spacer(Modifier.height(8.dp))
-                Text("空", color = SunColors.TextTertiary, fontSize = 11.sp)
+                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface3, modifier = Modifier.size(40.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("空", color = SunColors.TextTertiary, fontSize = 12.5.sp)
             }
 
             else -> LazyColumn(
@@ -1847,7 +1843,7 @@ private fun FileRow(
     Row(
         modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(Mt.RowHeight)
             .background(bg)
             .onGloballyPositioned { coords ->
                 val pos = coords.localToRoot(Offset.Zero)
@@ -1860,16 +1856,16 @@ private fun FileRow(
                 onLongClick = { onLongClick(rowOrigin) },
                 onClick = { onClick(rowOrigin) }
             )
-            .padding(start = 9.dp, end = 12.dp),
+            .padding(start = Mt.RowGutter, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         FileTypeBadge(
             file = entry.file,
             isDir = entry.isDir,
-            size = 26.dp,
+            size = Mt.RowIcon,
             modifier = Modifier.alpha((if (entry.canRead) 1f else 0.45f) * alpha)
         )
-        Spacer(Modifier.width(9.dp))
+        Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 entry.name,
@@ -1878,21 +1874,21 @@ private fun FileRow(
                     !entry.canRead -> SunColors.TextTertiary
                     else -> SunColors.TextPrimary
                 },
-                fontSize = 11.5.sp,
+                fontSize = Mt.Name,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(1.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 if (entry.isDir) {
                     Fmt.timeShort(entry.lastModified)
                 } else {
-                    Fmt.size(entry.size) + " · " + Fmt.timeShort(entry.lastModified)
+                    // MT 的顺序：先时间后大小，扫一眼就能比出「什么时候、多大」
+                    Fmt.timeShort(entry.lastModified) + " " + Fmt.sizeCompact(entry.size)
                 },
                 color = SunColors.TextTertiary,
-                fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = Mt.Meta,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1941,10 +1937,20 @@ private fun BottomBar(
     onCancel: () -> Unit
 ) {
     var moreOpen by remember { mutableStateOf(false) }
+    val hairline = SunColors.Hairline
     Column(
         Modifier
             .fillMaxWidth()
             .background(SunColors.Surface1)
+            .drawBehind {
+                val stroke = 0.6.dp.toPx()
+                drawLine(
+                    hairline,
+                    Offset(0f, stroke / 2),
+                    Offset(size.width, stroke / 2),
+                    stroke
+                )
+            }
             .animateContentSize()
             // 从底栏上滑打开书签，与 MT 一致；不消费事件，图标点击照常
             .pointerInput(Unit) {
@@ -1968,10 +1974,10 @@ private fun BottomBar(
     ) {
         AnimatedVisibility(visible = selectionMode) {
             Row(
-                Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("已选 $selectedCount 项", color = SunColors.Accent, fontSize = 9.5.sp)
+                Text("已选 $selectedCount 项", color = SunColors.Accent, fontSize = 11.5.sp)
                 Spacer(Modifier.weight(1f))
                 MiniChip("全选", onSelectAll)
                 MiniChip("反选", onInvert)
@@ -1987,7 +1993,7 @@ private fun BottomBar(
             label = "bottomBar"
         ) { selecting ->
             Row(
-                Modifier.fillMaxWidth().height(52.dp),
+                Modifier.fillMaxWidth().height(Mt.BottomHeight),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
@@ -2042,13 +2048,13 @@ private fun MiniChip(label: String, onClick: () -> Unit) {
     Text(
         label,
         color = SunColors.TextSecondary,
-        fontSize = 9.5.sp,
+        fontSize = 11.sp,
         modifier = Modifier
-            .padding(start = 6.dp)
+            .padding(start = 7.dp)
             .clip(SunShapes.Small)
             .background(SunColors.Surface3)
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = 9.dp, vertical = 4.dp)
     )
 }
 
@@ -2072,7 +2078,7 @@ private fun BarIcon(
     }
     Box(
         Modifier
-            .size(44.dp)
+            .size(46.dp)
             .clip(CircleShape)
             .pressScale(interaction, 0.86f)
             .combinedClickable(
@@ -2088,7 +2094,7 @@ private fun BarIcon(
             icon,
             contentDescription = label,
             tint = tint,
-            modifier = Modifier.size(21.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
 }
@@ -2171,8 +2177,8 @@ private fun DrawerContent(
                     )
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("SunDocument", color = SunColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 9.5.sp)
+                        Text("SunDocument", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 10.5.sp)
                     }
                 }
                 Spacer(Modifier.height(15.dp))
@@ -2193,9 +2199,9 @@ private fun DrawerContent(
             Text(
                 "快速访问",
                 color = SunColors.TextTertiary,
-                fontSize = 9.5.sp,
-                letterSpacing = 0.6.sp,
-                modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 5.dp)
+                fontSize = 10.5.sp,
+                letterSpacing = 0.4.sp,
+                modifier = Modifier.padding(start = 20.dp, top = 6.dp, bottom = 6.dp)
             )
             existing.forEach { (label, path, icon) ->
                 DrawerItem(
@@ -2211,7 +2217,7 @@ private fun DrawerContent(
                 Text(
                     "最近访问",
                     color = SunColors.TextTertiary,
-                    fontSize = 9.5.sp,
+                    fontSize = 10.5.sp,
                     letterSpacing = 0.6.sp,
                     modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
                 )
@@ -2262,20 +2268,20 @@ private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onCl
             .background(if (selected) SunColors.AccentSoft else Color.Transparent)
             .pressScale(interaction, 0.98f)
             .clickable(interactionSource = interaction, indication = LocalIndication.current) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             icon,
             null,
             tint = if (selected) SunColors.Accent else SunColors.TextSecondary,
-            modifier = Modifier.size(17.dp)
+            modifier = Modifier.size(19.dp)
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(13.dp))
         Text(
             label,
             color = if (selected) SunColors.Accent else SunColors.TextPrimary,
-            fontSize = 12.5.sp
+            fontSize = 13.sp
         )
     }
 }

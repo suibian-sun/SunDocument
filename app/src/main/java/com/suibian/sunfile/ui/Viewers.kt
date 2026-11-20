@@ -115,6 +115,7 @@ import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.ui.components.FileTypeBadge
 import com.suibian.sunfile.ui.theme.Motion
+import com.suibian.sunfile.ui.theme.Mt
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
@@ -158,23 +159,25 @@ internal fun OverlayShell(
                 .navigationBarsPadding()
         ) {
             Row(
-                Modifier.fillMaxWidth().height(54.dp).background(SunColors.Surface1).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().height(Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onClose, modifier = Modifier.size(42.dp)) {
+                IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         "返回",
-                        tint = SunColors.TextSecondary,
-                        modifier = Modifier.size(19.dp)
+                        tint = SunColors.TextPrimary,
+                        modifier = Modifier.size(21.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         title,
                         color = SunColors.TextPrimary,
-                        fontSize = 12.5.sp,
+                        fontSize = 16.5.sp,
                         fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.sp,
+                        lineHeight = 20.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -182,8 +185,7 @@ internal fun OverlayShell(
                         Text(
                             subtitle,
                             color = SunColors.TextTertiary,
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )

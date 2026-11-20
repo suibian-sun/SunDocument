@@ -420,15 +420,16 @@ fun EditorOverlay(
         ) {
             // ---------------- 顶栏 ----------------
             Row(
-                Modifier.fillMaxWidth().height(52.dp).background(SunColors.Surface1).padding(horizontal = 2.dp),
+                Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight)
+                    .background(SunColors.Surface1).padding(horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { close() }, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = { close() }, modifier = Modifier.size(46.dp)) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         "返回",
-                        tint = SunColors.TextSecondary,
-                        modifier = Modifier.size(19.dp)
+                        tint = SunColors.TextPrimary,
+                        modifier = Modifier.size(21.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
@@ -436,8 +437,9 @@ fun EditorOverlay(
                         Text(
                             state.file?.name ?: file.name,
                             color = SunColors.TextPrimary,
-                            fontSize = 12.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -449,8 +451,7 @@ fun EditorOverlay(
                     Text(
                         (state.file ?: file).parent ?: "",
                         color = SunColors.TextTertiary,
-                        fontSize = 8.5.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -946,7 +947,7 @@ fun EditorOverlay(
             onDismissRequest = { exitConfirm = false },
             containerColor = SunColors.Surface4,
             shape = SunShapes.Medium,
-            title = { Text("还有未保存的修改", color = SunColors.TextPrimary, fontSize = 15.sp) },
+            title = { Text("还有未保存的修改", color = SunColors.TextPrimary, fontSize = 17.sp) },
             text = { Text("退出后本次修改会丢失，是否先保存？", color = SunColors.TextSecondary, fontSize = 12.sp) },
             confirmButton = {
                 TextButton(onClick = {
@@ -1142,7 +1143,7 @@ private fun HistorySheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("修改历史", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("修改历史", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                     Text("$revisionCount 个版本", color = SunColors.TextTertiary, fontSize = 9.5.sp)
                 }
                 if (revisions.isNotEmpty()) {
@@ -1232,7 +1233,7 @@ private fun ReplaceDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("查找并替换", color = SunColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        title = { Text("查找并替换", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column {
                 SunTextField(
