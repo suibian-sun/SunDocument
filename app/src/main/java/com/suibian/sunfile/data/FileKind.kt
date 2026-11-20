@@ -24,24 +24,28 @@ object FileKinds {
 
     private val IMAGE = setOf(
         "png", "jpg", "jpeg", "jpe", "gif", "webp", "bmp", "heic", "heif", "avif", "ico",
-        "tiff", "tif", "svg", "apng", "wbmp", "raw", "dng", "psd", "jfif", "pjpeg"
+        "tiff", "tif", "svg", "apng", "wbmp", "raw", "dng", "psd", "jfif", "pjpeg",
+        "jxl", "exr", "hdr", "tga", "pcx", "ppm", "pgm", "pbm", "dds", "webm2"
     )
     private val AUDIO = setOf(
-        "mp3", "flac", "wav", "ogg", "oga", "m4a", "aac", "opus", "amr", "mid", "midi",
-        "wma", "ape", "dsf", "ac3", "mka", "ra", "aiff", "aif", "caf"
+        "mp3", "flac", "wav", "ogg", "oga", "m4a", "m4b", "aac", "opus", "amr", "mid", "midi",
+        "wma", "ape", "dsf", "dff", "ac3", "mka", "ra", "aiff", "aif", "caf", "mp2", "mp1",
+        "spx", "tta", "wv", "kar", "m3u", "m3u8"
     )
     private val VIDEO = setOf(
         "mp4", "mkv", "avi", "mov", "webm", "3gp", "3g2", "flv", "ts", "m2ts", "m4v",
-        "wmv", "mpg", "mpeg", "rmvb", "rm", "vob", "ogv", "asf", "f4v", "mts", "divx"
+        "wmv", "mpg", "mpeg", "rmvb", "rm", "vob", "ogv", "asf", "f4v", "mts", "divx",
+        "m2v", "mpe", "m1v", "mxf", "ogm", "vp9", "h264", "h265", "hevc", "3gpp"
     )
     private val ARCHIVE = setOf(
         "zip", "jar", "aar", "war", "ear", "sar", "whl", "epub", "apk", "xapk", "apks",
-        "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "zst",
-        "lz4", "iso", "cab", "arj", "lzh", "cpio", "z", "tar.gz", "tar.bz2"
+        "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "lzma",
+        "tar.gz", "tar.bz2", "tar.xz", "cbz", "cb7"
     )
     private val OFFICE = setOf(
         "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "wps", "et",
-        "dps", "rtf", "csv", "tsv", "pages", "numbers", "key", "docm", "xlsm", "pptm"
+        "dps", "rtf", "csv", "tsv", "pages", "numbers", "key", "docm", "xlsm", "pptm",
+        "dotx", "xltx", "potx", "dot", "xlt", "pot"
     )
     private val TEXT = setOf(
         "txt", "md", "markdown", "json", "json5", "xml", "yml", "yaml", "ini", "conf", "cfg",
@@ -96,17 +100,19 @@ object FileKinds {
         }
     }
 
-    /** 该文件能否用内置压缩包浏览器打开 */
+    /** 该文件能否用内置压缩包浏览器打开（rar / 7z / tar 族都算） */
     fun isZipReadable(file: File): Boolean {
         val ext = extensionOf(file)
-        return ext in ARCHIVE || ext in setOf("docx", "xlsx", "pptx", "odt", "ods", "odp", "wps", "et", "dps")
+        if (ext in setOf("docx", "xlsx", "pptx", "odt", "ods", "odp", "wps", "et", "dps")) return true
+        return Archives.supported(file)
     }
 
     /** 该文件是否能用内置文档查看器打开 */
     fun isDocumentReadable(file: File): Boolean {
         val ext = extensionOf(file)
         return ext in setOf(
-            "docx", "xlsx", "pptx", "odt", "ods", "odp", "csv", "tsv", "docm", "xlsm", "pptm"
+            "docx", "xlsx", "pptx", "odt", "ods", "odp", "csv", "tsv", "docm", "xlsm", "pptm",
+            "md", "markdown", "html", "htm", "xml", "json", "log", "ini", "conf", "yml", "yaml"
         )
     }
 
@@ -121,7 +127,7 @@ object FileKinds {
         FileKind.DIR -> null
         FileKind.TEXT -> OpenMode.TEXT
         FileKind.IMAGE -> OpenMode.IMAGE
-        FileKind.ARCHIVE, FileKind.APK -> OpenMode.ARCHIVE
+        FileKind.ARCHIVE, FileKind.APK -> if (isZipReadable(file)) OpenMode.ARCHIVE else OpenMode.EXTERNAL
         FileKind.AUDIO -> OpenMode.AUDIO
         FileKind.VIDEO -> OpenMode.VIDEO
         FileKind.OFFICE -> if (isDocumentReadable(file)) OpenMode.DOCUMENT else OpenMode.EXTERNAL

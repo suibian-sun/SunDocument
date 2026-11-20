@@ -1,6 +1,7 @@
 package com.suibian.sunfile
 
 import com.suibian.sunfile.data.ArchiveEdit
+import com.suibian.sunfile.data.Archives
 import com.suibian.sunfile.data.Axml
 import com.suibian.sunfile.data.DexIndex
 import com.suibian.sunfile.data.Diff
@@ -218,7 +219,7 @@ class ToolsTest {
         File(sub, "b.txt").writeText("world")
         val zip = File(dir, "out.zip")
 
-        val count = ArchiveEdit.create(listOf(a, sub), zip, ArchiveEdit.Format.ZIP)
+        val count = Archives.create(listOf(a, sub), zip, Archives.Format.ZIP)
         assertTrue(count >= 3)
         val names = FileRepo.archiveEntries(zip).map { it.name }
         assertTrue(names.contains("a.txt"))
@@ -239,10 +240,40 @@ class ToolsTest {
         val dir = tempDir()
         val a = File(dir, "note.txt").apply { writeText("tar content") }
         val tar = File(dir, "out.tar")
-        ArchiveEdit.create(listOf(a), tar, ArchiveEdit.Format.TAR)
+        Archives.create(listOf(a), tar, Archives.Format.TAR)
         val names = FileRepo.archiveEntries(tar).map { it.name }
         assertTrue(names.contains("note.txt"))
         assertTrue(String(FileRepo.readArchiveEntry(tar, "note.txt")).contains("tar content"))
+    }
+
+    @Test
+    fun sevenZCreateAndRead() {
+        val dir = tempDir()
+        val a = File(dir, "note.txt").apply { writeText("7z content") }
+        val sub = File(dir, "sub").apply { mkdirs() }
+        File(sub, "b.txt").writeText("nested")
+        val out = File(dir, "out.7z")
+        val count = Archives.create(listOf(a, sub), out, Archives.Format.SEVEN_Z)
+        assertTrue(count >= 3)
+        assertTrue(out.length() > 0)
+        val names = Archives.entries(out).map { it.name }
+        assertTrue(names.contains("note.txt"))
+        assertTrue(String(Archives.readEntry(out, "note.txt")).contains("7z content"))
+        assertTrue(names.contains("sub/b.txt"))
+        val target = Archives.extractEntry(out, "note.txt", File(dir, "x"))
+        assertEquals("7z content", target.readText())
+    }
+
+    @Test
+    fun encryptedZipNeedsPassword() {
+        val dir = tempDir()
+        val a = File(dir, "secret.txt").apply { writeText("top secret") }
+        val out = File(dir, "enc.zip")
+        Archives.create(listOf(a), out, Archives.Format.ZIP, level = 6, password = "1234")
+        val names = Archives.entries(out, "1234").map { it.name }
+        assertTrue(names.contains("secret.txt"))
+        assertEquals("top secret", String(Archives.readEntry(out, "secret.txt", password = "1234")))
+        assertFalse(runCatching { Archives.readEntry(out, "secret.txt", password = "bad") }.isSuccess)
     }
 
     @Test
@@ -250,7 +281,7 @@ class ToolsTest {
         val dir = tempDir()
         val a = File(dir, "x.txt").apply { writeText("gzip content") }
         val tgz = File(dir, "out.tar.gz")
-        ArchiveEdit.create(listOf(a), tgz, ArchiveEdit.Format.TAR_GZ)
+        Archives.create(listOf(a), tgz, Archives.Format.TAR_GZ)
         assertTrue(String(FileRepo.readArchiveEntry(tgz, "x.txt")).contains("gzip content"))
     }
 }

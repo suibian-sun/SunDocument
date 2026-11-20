@@ -73,6 +73,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val maxUndoChars = 8L * 1024 * 1024
 
     fun open(file: File, encoding: String? = null) {
+        // 超大文件直接拒绝：整篇读入会 OOM，提示改用十六进制编辑器分段查看
+        if (runCatching { file.length() }.getOrDefault(0L) > 32L * 1024 * 1024) {
+            _state.value = EditorState(
+                file = file,
+                loading = false,
+                error = "文件超过 32 MB，请用十六进制编辑器打开"
+            )
+            return
+        }
         undoStack.clear()
         redoStack.clear()
         undoChars = 0

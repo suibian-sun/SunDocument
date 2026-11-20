@@ -139,7 +139,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /** 首次打开后，滚动到底部会自动继续追加的字节上限；再往后改为手动点击加载 */
-private const val AUTO_GROW_LIMIT = 1_200_000L
+private const val AUTO_GROW_LIMIT = 256_000L
 
 private fun lineIndexOf(text: String, offset: Int): Int {
     var line = 1
@@ -408,6 +408,8 @@ fun EditorOverlay(
     val highlight = remember(state.lang, codeColors) {
         Syntax.CodeHighlightTransformation(state.lang, codeColors)
     }
+    // 大文本关闭高亮与补全：整篇着色是 O(n)，在 10 万字以上会把主线程拖死
+    val heavy = value.text.length > 120_000 || state.totalBytes > 4L * 1024 * 1024
 
     CircularReveal(origin = origin, visible = visible, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -709,13 +711,13 @@ fun EditorOverlay(
                         BasicTextField(
                             value = value,
                             onValueChange = { nv ->
-                                val smart = Syntax.smartEdit(nv, value)
+                                val smart = if (heavy) nv else Syntax.smartEdit(nv, value)
                                 value = smart
-                                refreshSuggestions(smart)
+                                if (!heavy) refreshSuggestions(smart) else completion = null
                             },
                             textStyle = textStyle,
                             cursorBrush = SolidColor(SunColors.Accent),
-                            visualTransformation = highlight,
+                            visualTransformation = if (heavy) androidx.compose.ui.text.input.VisualTransformation.None else highlight,
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Text,
                                 imeAction = ImeAction.Default

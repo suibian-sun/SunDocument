@@ -82,6 +82,21 @@ object Shell {
         }
     }
 
+    /** 通用执行：asRoot 且已授权时走 su，否则走普通 sh */
+    fun runScript(script: String, asRoot: Boolean = false, timeoutMs: Long = 25_000): ShellResult =
+        if (asRoot && enabled) exec(listOf("su", "-c", script), timeoutMs)
+        else exec(listOf("/system/bin/sh", "-c", script), timeoutMs)
+
+    /** 判断目录是否存在并返回真实路径；root 模式下可以解析受限目录 */
+    fun resolveDir(path: String): String? {
+        if (!enabled) {
+            val f = File(path)
+            return if (f.isDirectory) runCatching { f.canonicalPath }.getOrDefault(f.absolutePath) else null
+        }
+        val r = sh("if [ -d ${q(path)} ]; then readlink -f ${q(path)} 2>/dev/null || echo ${q(path)}; fi")
+        return r.out.trim().takeIf { it.isNotEmpty() }
+    }
+
     /** 以 root 执行一段 shell 脚本 */
     fun sh(script: String, timeoutMs: Long = 20_000): ShellResult =
         if (!enabled) ShellResult("", "root disabled", -1)

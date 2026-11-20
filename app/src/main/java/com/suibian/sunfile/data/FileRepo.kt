@@ -59,7 +59,7 @@ object FileRepo {
      */
     const val TEXT_EDIT_LIMIT = 8L * 1024 * 1024
     /** 编辑器首屏与每次追加的段大小 */
-    const val EDITOR_WINDOW = 200 * 1024
+    const val EDITOR_WINDOW = 64 * 1024
     /** 旧常量保留，供历史代码引用 */
     const val TEXT_PREVIEW_BYTES = TEXT_EDIT_LIMIT
     const val MAX_TEXT_BYTES = TEXT_EDIT_LIMIT
@@ -378,7 +378,7 @@ object FileRepo {
     }
 
     fun readText(file: File): String {
-        if (file.length() > TEXT_EDIT_LIMIT) throw IOException("文件过大")
+        if (file.length() > TEXT_EDIT_LIMIT) throw IOException("文件过大，请用十六进制编辑器打开")
         return decodeText(file.readBytes(), file.length().toInt()).first
     }
 
@@ -660,34 +660,22 @@ object FileRepo {
 
     // ---------------- 压缩包：zip / tar / tar.gz / gz ----------------
 
-    enum class ArchiveKind { ZIP, TAR, GZIP, UNSUPPORTED }
+    enum class ArchiveKind { ZIP, TAR, GZIP, SEVEN_Z, RAR, BZIP2, XZ, UNSUPPORTED }
 
-    fun archiveKindOf(file: File): ArchiveKind {
-        val ext = FileKinds.extensionOf(file)
-        return when {
-            ext in setOf("zip", "jar", "aar", "war", "ear", "whl", "epub", "apk", "xapk", "apks") -> ArchiveKind.ZIP
-            ext == "tar" -> ArchiveKind.TAR
-            ext in setOf("tar.gz", "tgz") -> ArchiveKind.TAR
-            ext == "gz" -> ArchiveKind.GZIP
-            else -> ArchiveKind.UNSUPPORTED
-        }
+    fun archiveKindOf(file: File): ArchiveKind = when (Archives.kindOf(file)) {
+        Archives.Kind.ZIP -> ArchiveKind.ZIP
+        Archives.Kind.RAR -> ArchiveKind.RAR
+        Archives.Kind.SEVEN_Z -> ArchiveKind.SEVEN_Z
+        Archives.Kind.TAR, Archives.Kind.TAR_GZ, Archives.Kind.TAR_BZ2, Archives.Kind.TAR_XZ -> ArchiveKind.TAR
+        Archives.Kind.GZIP -> ArchiveKind.GZIP
+        Archives.Kind.BZIP2 -> ArchiveKind.BZIP2
+        Archives.Kind.XZ -> ArchiveKind.XZ
+        Archives.Kind.UNSUPPORTED -> ArchiveKind.UNSUPPORTED
     }
 
-    /** 统一的条目列表：zip 走 ZipFile，tar/gz 走流式解析 */
-    fun archiveEntries(file: File): List<ZipItem> = when (archiveKindOf(file)) {
-        ArchiveKind.ZIP -> zipEntries(file)
-        ArchiveKind.TAR -> tarEntries(openTar(file))
-        ArchiveKind.GZIP -> listOf(
-            ZipItem(
-                name = file.name.removeSuffix(".gz").ifEmpty { "content" },
-                isDir = false,
-                size = file.length(),
-                compressed = file.length(),
-                time = file.lastModified()
-            )
-        )
-        ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式，可用其他应用打开")
-    }
+    /** 统一的条目列表，zip / rar / 7z / tar 族 / 单流压缩全部走 Archives */
+    fun archiveEntries(file: File, password: String? = null): List<ZipItem> =
+        Archives.entries(file, password)
 
     private fun openTar(file: File): java.io.InputStream {
         val ext = FileKinds.extensionOf(file)
@@ -761,37 +749,12 @@ object FileRepo {
         return String(buf, offset, end - offset, Charsets.UTF_8)
     }
 
-    fun readArchiveEntry(file: File, name: String, maxBytes: Long = 512 * 1024): ByteArray =
-        when (archiveKindOf(file)) {
-            ArchiveKind.ZIP -> readZipEntry(file, name, maxBytes)
-            ArchiveKind.GZIP -> {
-                GZIPInputStream(BufferedInputStream(FileInputStream(file))).use { input ->
-                    val buf = ByteArray(minOf(maxBytes, 8L * 1024 * 1024).toInt())
-                    var read = 0
-                    while (read < buf.size) {
-                        val n = input.read(buf, read, buf.size - read)
-                        if (n <= 0) break
-                        read += n
-                    }
-                    buf.copyOf(read)
-                }
-            }
-            ArchiveKind.TAR -> {
-                var result: ByteArray? = null
-                val target = name
-                scanTar(file) { entryName, stream, size ->
-                    if (entryName == target) {
-                        val limit = minOf(size, maxBytes).toInt()
-                        val buf = ByteArray(limit.coerceAtLeast(0))
-                        readFully(stream, buf, limit)
-                        result = buf
-                        true
-                    } else false
-                }
-                result ?: throw IOException("压缩包内不存在该文件")
-            }
-            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
-        }
+    fun readArchiveEntry(
+        file: File,
+        name: String,
+        maxBytes: Long = 512 * 1024,
+        password: String? = null
+    ): ByteArray = Archives.readEntry(file, name, maxBytes, password)
 
     /** 顺序扫 tar，把命中条目的数据流交给回调；返回 true 表示已找到并停止 */
     private fun scanTar(file: File, onEntry: (String, java.io.InputStream, Long) -> Boolean) {
@@ -822,44 +785,19 @@ object FileRepo {
         }
     }
 
-    fun extractArchiveEntry(archive: File, entryName: String, destDir: File): File =
-        when (archiveKindOf(archive)) {
-            ArchiveKind.ZIP -> extractZipEntry(archive, entryName, destDir)
-            ArchiveKind.GZIP -> {
-                val out = uniqueTarget(destDir, archive.name.removeSuffix(".gz").ifEmpty { "content" })
-                GZIPInputStream(BufferedInputStream(FileInputStream(archive))).use { input ->
-                    BufferedOutputStream(FileOutputStream(out)).use { output -> input.copyTo(output, 128 * 1024) }
-                }
-                out
-            }
-            ArchiveKind.TAR -> {
-                var out: File? = null
-                val target = entryName
-                scanTar(archive) { name, stream, _ ->
-                    if (name == target) {
-                        out = uniqueTarget(destDir, name.substringAfterLast('/').ifEmpty { "entry" })
-                        BufferedOutputStream(FileOutputStream(out!!)).use { output ->
-                            stream.copyTo(output, 128 * 1024)
-                        }
-                        true
-                    } else false
-                }
-                out ?: throw IOException("压缩包内不存在该文件")
-            }
-            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
-        }
+    fun extractArchiveEntry(
+        archive: File,
+        entryName: String,
+        destDir: File,
+        password: String? = null
+    ): File = Archives.extractEntry(archive, entryName, destDir, password)
 
-    fun extractArchive(archive: File, destDir: File, onProgress: (String, Int, Int) -> Unit): Int =
-        when (archiveKindOf(archive)) {
-            ArchiveKind.ZIP -> extractZip(archive, destDir, onProgress)
-            ArchiveKind.TAR -> extractTarAll(archive, destDir, onProgress)
-            ArchiveKind.GZIP -> {
-                val out = extractArchiveEntry(archive, archive.name, destDir)
-                onProgress(out.name, 1, 1)
-                1
-            }
-            ArchiveKind.UNSUPPORTED -> throw IOException("暂不支持这种压缩格式")
-        }
+    fun extractArchive(
+        archive: File,
+        destDir: File,
+        onProgress: (String, Int, Int) -> Unit,
+        password: String? = null
+    ): Int = Archives.extractAll(archive, destDir, password, onProgress)
 
     /** tar 一遍流式解压：每个条目只读一次，不再为每个文件重新扫全包 */
     private fun extractTarAll(archive: File, destDir: File, onProgress: (String, Int, Int) -> Unit): Int {

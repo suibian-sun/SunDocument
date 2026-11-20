@@ -1,6 +1,7 @@
 package com.suibian.sunfile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -52,14 +54,16 @@ fun SearchPage(
     onCancel: () -> Unit,
     onResult: (FileEntry) -> Unit,
     onModeChange: (SearchMode) -> Unit,
-    onContentResult: (com.suibian.sunfile.data.FileRepo.ContentHit) -> Unit
+    onContentResult: (com.suibian.sunfile.data.FileRepo.ContentHit) -> Unit,
+    dense: Boolean = false
 ) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(SunColors.Bg)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .then(
+                if (dense) Modifier
+                else Modifier.background(SunColors.Bg).statusBarsPadding().navigationBarsPadding()
+            )
     ) {
         Row(
             Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
@@ -123,11 +127,7 @@ fun SearchPage(
                         color = SunColors.TextTertiary,
                         style = NumberStyle
                     )
-                    Text(
-                        "点击右侧按钮停止",
-                        color = SunColors.TextTertiary,
-                        fontSize = 9.5.sp
-                    )
+                    Text("停止", color = SunColors.TextTertiary, fontSize = 9.5.sp)
                 }
                 if (state.current.isNotEmpty()) {
                     Text(
@@ -232,11 +232,10 @@ fun SearchPage(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = com.suibian.sunfile.ui.components.iconOf(r.entry.file, r.entry.isDir),
-                            contentDescription = null,
-                            tint = com.suibian.sunfile.ui.components.tintOf(r.entry.file, r.entry.isDir),
-                            modifier = Modifier.size(19.dp)
+                        com.suibian.sunfile.ui.components.FileTypeBadge(
+                            file = r.entry.file,
+                            isDir = r.entry.isDir,
+                            size = 22.dp
                         )
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -274,6 +273,58 @@ fun SearchPage(
                     color = SunColors.TextTertiary,
                     fontSize = 9.5.sp,
                     modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * 搜索以弹窗呈现：不离开当前目录，结果点开就跳回列表。
+ */
+@Composable
+fun SearchDialog(
+    state: SearchUiState,
+    onDismiss: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onCancel: () -> Unit,
+    onResult: (FileEntry) -> Unit,
+    onModeChange: (SearchMode) -> Unit,
+    onContentResult: (com.suibian.sunfile.data.FileRepo.ContentHit) -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .padding(horizontal = 10.dp, vertical = 44.dp),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SunColors.Surface1)
+            ) {
+                SearchPage(
+                    state = state,
+                    onBack = onDismiss,
+                    onQueryChange = onQueryChange,
+                    onSearch = onSearch,
+                    onCancel = onCancel,
+                    onResult = onResult,
+                    onModeChange = onModeChange,
+                    onContentResult = onContentResult,
+                    dense = true
                 )
             }
         }

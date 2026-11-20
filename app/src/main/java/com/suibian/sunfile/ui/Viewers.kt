@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -112,6 +113,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.suibian.sunfile.data.FileKinds
+import com.suibian.sunfile.data.Archives
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.ui.components.FileTypeBadge
 import com.suibian.sunfile.ui.theme.Motion
@@ -422,6 +424,7 @@ private fun ArrowChip(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 
 @Composable
 private fun ZoomableImage(file: File, onSwipe: (Int) -> Unit) {
+    val ctx = LocalContext.current
     val animated = Build.VERSION.SDK_INT >= 28 &&
         file.extension.lowercase() in setOf("gif", "webp", "apng")
     var bitmap by remember(file) { mutableStateOf<Bitmap?>(null) }
@@ -433,14 +436,27 @@ private fun ZoomableImage(file: File, onSwipe: (Int) -> Unit) {
 
     LaunchedEffect(file, animated) {
         if (animated) return@LaunchedEffect
-        val bmp = withContext(Dispatchers.IO) { decodeSampled(file, 2600) }
+        val bmp = withContext(Dispatchers.IO) { decodeSampled(file, 2048) }
         if (bmp == null) failed = true else bitmap = bmp
     }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val bmp = bitmap
         when {
-            failed -> Text("这张图片无法解码", color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+            failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("这张图片无法解码", color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "用其他应用打开",
+                    color = SunColors.Accent,
+                    fontSize = 11.5.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable(enabled = !animated) { openExternally(ctx, file) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
             animated -> AnimatedImage(
                 file = file,
                 modifier = Modifier
@@ -553,11 +569,54 @@ private fun decodeSampled(file: File, maxDim: Int): Bitmap? {
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
     while (bounds.outWidth / sample > maxDim || bounds.outHeight / sample > maxDim) sample *= 2
+    // 大图降为 RGB_565：省一半内存，照片级预览几乎看不出差别
+    val huge = bounds.outWidth.toLong() * bounds.outHeight > 8_000_000
     val opts = BitmapFactory.Options().apply {
         inSampleSize = sample
-        inPreferredConfig = Bitmap.Config.ARGB_8888
+        inPreferredConfig = if (huge) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
     }
     return runCatching { BitmapFactory.decodeFile(file.absolutePath, opts) }.getOrNull()
+}
+
+// ---------------- 网页 / SVG 预览 ----------------
+
+/**
+ * SVG 与 HTML 交给系统 WebView 渲染：矢量图、内联样式与简单脚本都能正确显示，
+ * 比把源码当文本打开更接近"预览"。
+ */
+@Composable
+fun WebPreviewOverlay(file: File, onClose: () -> Unit) {
+    var web by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching {
+                web?.stopLoading()
+                web?.destroy()
+            }
+        }
+    }
+    OverlayShell(
+        title = file.name,
+        subtitle = "网页预览 · ${Fmt.size(file.length())}",
+        onClose = onClose,
+        actions = {}
+    ) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = false
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    web = this
+                    runCatching { loadUrl(file.toURI().toString()) }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 // ---------------- 压缩包浏览器 ----------------
@@ -574,8 +633,10 @@ fun ArchiveOverlay(
     file: File,
     destDir: File,
     opVersion: Int = 0,
+    initialPrefix: String = "",
+    onPrefixChange: (String) -> Unit = {},
     onClose: () -> Unit,
-    onExtractAll: () -> Unit,
+    onExtractAll: (String?) -> Unit,
     onOpenEntry: (File, String) -> Unit,
     onRenameRequest: (String) -> Unit = {},
     onDeleteEntry: (String) -> Unit = {},
@@ -584,14 +645,37 @@ fun ArchiveOverlay(
     val context = LocalContext.current
     var entries by remember(file) { mutableStateOf<List<FileRepo.ZipItem>?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
-    var prefix by remember(file) { mutableStateOf("") }
+    var prefix by remember(file) { mutableStateOf(initialPrefix) }
     var opening by remember { mutableStateOf<String?>(null) }
     var menuNode by remember { mutableStateOf<ArcNode?>(null) }
+    var password by remember(file) { mutableStateOf("") }
+    var askPassword by remember(file) { mutableStateOf(false) }
+    var passwordError by remember { mutableStateOf(false) }
+    var attempt by remember { mutableIntStateOf(0) }
+    var passwordPrompt by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(file, opVersion) {
-        val result = withContext(Dispatchers.IO) { runCatching { FileRepo.archiveEntries(file) } }
-        result.onSuccess { entries = it }.onFailure { error = it.message ?: "无法读取压缩包" }
+    LaunchedEffect(prefix) { onPrefixChange(prefix) }
+
+    LaunchedEffect(file, opVersion, password, attempt) {
+        entries = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { Archives.entries(file, password.ifEmpty { null }) }
+        }
+        result.onSuccess {
+            entries = it
+            error = null
+            passwordError = false
+            askPassword = false
+        }.onFailure {
+            error = it.message ?: "无法读取压缩包"
+            if (Archives.needsPassword(file) || (it.message ?: "").contains("password", true) ||
+                (it.message ?: "").contains("密码")
+            ) {
+                askPassword = true
+                passwordError = password.isNotEmpty()
+            }
+        }
     }
 
     val list = entries
@@ -605,12 +689,17 @@ fun ArchiveOverlay(
                 runCatching {
                     val dir = File(context.cacheDir, "archive/${file.nameWithoutExtension}")
                     dir.mkdirs()
-                    FileRepo.extractArchiveEntry(file, node.full, dir)
+                    Archives.extractEntry(file, node.full, dir, password.ifEmpty { null })
                 }.getOrNull()
             }
             opening = null
             if (out != null) {
                 onOpenEntry(out, node.full)
+            } else if (password.isEmpty() &&
+                (Archives.kindOf(file) == Archives.Kind.ZIP || Archives.kindOf(file) == Archives.Kind.RAR)
+            ) {
+                // 条目已经列出来了，说明只是内容被加密：就地要密码，不打断浏览
+                passwordPrompt = true
             } else {
                 android.widget.Toast.makeText(context, "无法解压这个文件", android.widget.Toast.LENGTH_SHORT).show()
             }
@@ -619,15 +708,15 @@ fun ArchiveOverlay(
 
     OverlayShell(
         title = file.name,
-        subtitle = list?.let { "${it.size} 个条目 · ${Fmt.size(file.length())}" } ?: "读取中…",
+        subtitle = list?.let { "${it.size} 个条目 · ${Fmt.size(file.length())} · ${kindLabel(file)}" } ?: "读取中…",
         onClose = onClose,
         actions = {
-            if (FileKinds.isZipReadable(file)) {
+            if (FileKinds.isZipReadable(file) && Archives.kindOf(file) == Archives.Kind.ZIP) {
                 IconButton(onClick = onAddFiles, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Outlined.Add, "添加文件", tint = SunColors.TextSecondary, modifier = Modifier.size(19.dp))
                 }
             }
-            IconButton(onClick = onExtractAll, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = { onExtractAll(password.ifEmpty { null }) }, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Unarchive, "全部解压", tint = SunColors.Accent, modifier = Modifier.size(19.dp))
             }
         }
@@ -662,15 +751,43 @@ fun ArchiveOverlay(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text("这个压缩格式暂不支持", color = SunColors.TextSecondary, fontSize = 12.5.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        error ?: "",
-                        color = SunColors.TextTertiary,
-                        fontSize = 10.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 15.sp
-                    )
+                    if (askPassword) {
+                        Text("需要密码", color = SunColors.TextPrimary, fontSize = 13.sp)
+                        Spacer(Modifier.height(10.dp))
+                        SunTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = "压缩包密码",
+                            password = true,
+                            modifier = Modifier.fillMaxWidth(0.8f),
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                            onDone = { attempt++ }
+                        )
+                        if (passwordError) {
+                            Text("密码不正确", color = SunColors.Danger, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "解锁",
+                            color = SunColors.Accent,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .background(SunColors.AccentSoft)
+                                .clickable { attempt++ }
+                                .padding(horizontal = 16.dp, vertical = 7.dp)
+                        )
+                    } else {
+                        Text("无法打开这个压缩包", color = SunColors.TextSecondary, fontSize = 12.5.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            error ?: "",
+                            color = SunColors.TextTertiary,
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 15.sp
+                        )
+                    }
                 }
 
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -728,24 +845,42 @@ fun ArchiveOverlay(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().height(44.dp).background(SunColors.Surface1).padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Outlined.Archive, null, tint = SunColors.TextTertiary, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(8.dp))
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "解压全部",
-                    color = SunColors.Accent,
-                    fontSize = 11.5.sp,
-                    modifier = Modifier
-                        .clip(SunShapes.Small)
-                        .clickable { onExtractAll() }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                )
-            }
         }
+    }
+
+    if (passwordPrompt) {
+        var input by remember { mutableStateOf("") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { passwordPrompt = false },
+            containerColor = SunColors.Surface4,
+            shape = SunShapes.Medium,
+            title = { Text("压缩包已加密", color = SunColors.TextPrimary, fontSize = 15.sp) },
+            text = {
+                Column {
+                    Text("输入密码后重新点击文件即可打开", color = SunColors.TextTertiary, fontSize = 10.5.sp)
+                    Spacer(Modifier.height(10.dp))
+                    SunTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        label = "密码",
+                        password = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    password = input
+                    passwordPrompt = false
+                    attempt++
+                }) { Text("解锁", color = SunColors.Accent, fontSize = 13.sp) }
+            },
+            dismissButton = {
+                TextButton(onClick = { passwordPrompt = false }) {
+                    Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp)
+                }
+            }
+        )
     }
 
     menuNode?.let { node ->
@@ -795,6 +930,21 @@ fun ArchiveOverlay(
             }
         )
     }
+}
+
+private fun kindLabel(file: File): String = when (Archives.kindOf(file)) {
+    Archives.Kind.ZIP -> "ZIP"
+    Archives.Kind.RAR -> "RAR"
+    Archives.Kind.SEVEN_Z -> "7Z"
+    Archives.Kind.TAR -> "TAR"
+    Archives.Kind.TAR_GZ -> "TAR.GZ"
+    Archives.Kind.TAR_BZ2 -> "TAR.BZ2"
+    Archives.Kind.TAR_XZ -> "TAR.XZ"
+    Archives.Kind.GZIP -> "GZ"
+    Archives.Kind.BZIP2 -> "BZ2"
+    Archives.Kind.XZ -> "XZ"
+    Archives.Kind.UNSUPPORTED -> ""
+    else -> ""
 }
 
 private fun immediateChildren(entries: List<FileRepo.ZipItem>, prefix: String): List<ArcNode> {
@@ -1011,6 +1161,7 @@ fun VideoViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
 
 @Composable
 fun AudioSheetOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
+    val context = LocalContext.current
     val list = remember(playlist, file) {
         if (playlist.any { it.absolutePath == file.absolutePath }) playlist else listOf(file)
     }
@@ -1102,12 +1253,12 @@ fun AudioSheetOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
             )
             Column(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .align(Alignment.Center)
+                    .fillMaxWidth(0.90f)
+                    .widthIn(max = 420.dp)
+                    .clip(RoundedCornerShape(20.dp))
                     .background(SunColors.Surface3)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -1145,12 +1296,16 @@ fun AudioSheetOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(2.dp))
+                        val subtitle = failure?.let { "$it · 点此用其他应用打开" }
+                            ?: if (list.size > 1) "${index + 1} / ${list.size}"
+                            else current.parent?.substringAfterLast('/').orEmpty()
                         Text(
-                            failure ?: if (list.size > 1) "${index + 1} / ${list.size}" else current.parent?.substringAfterLast('/').orEmpty(),
+                            subtitle,
                             color = if (failure != null) SunColors.Danger else SunColors.TextTertiary,
                             fontSize = 9.5.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (failure != null) Modifier.clickable { openExternally(context, current) } else Modifier
                         )
                     }
                     IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {

@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -176,18 +178,20 @@ sealed interface Page {
     data object Search : Page
     data object Settings : Page
     data object Terminal : Page
+    data object Changelog : Page
 }
 
 /** 内置全屏查看器 */
 private sealed interface Viewer {
     data class Hex(val file: File) : Viewer
     data class Image(val file: File, val playlist: List<File>) : Viewer
-    data class Archive(val file: File) : Viewer
+    data class Archive(val file: File, val prefix: String = "") : Viewer
     data class Audio(val file: File, val playlist: List<File>) : Viewer
     data class Video(val file: File, val playlist: List<File>) : Viewer
     data class Doc(val file: File) : Viewer
     data class Compare(val left: File, val right: File) : Viewer
     data class Reverse(val file: File, val tab: Int = 0) : Viewer
+    data class Web(val file: File) : Viewer
 }
 
 @Composable
@@ -228,6 +232,10 @@ fun MainScreen(
     var contextMenu by remember { mutableStateOf<Pair<FileEntry, Offset>?>(null) }
     var archiveVersion by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
+    var searchOpen by remember { mutableStateOf(false) }
+    // 从压缩包内打开文件时记住来源，关掉查看器/编辑器后回到原来的压缩包位置
+    var archiveReturn by remember { mutableStateOf<ArchiveReturn?>(null) }
+    var archivePrefix by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { vm.init() }
 
@@ -255,7 +263,9 @@ fun MainScreen(
     }
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = drawerState.isClosed && page != Page.Files) { page = Page.Files }
+    BackHandler(enabled = drawerState.isClosed && page != Page.Files) {
+        page = if (page == Page.Changelog) Page.Settings else Page.Files
+    }
     BackHandler(enabled = drawerState.isClosed && page == Page.Files && pane.selectionMode) {
         vm.clearSelection()
     }
@@ -279,7 +289,22 @@ fun MainScreen(
         return if (list.any { it.absolutePath == file.absolutePath }) list else listOf(file)
     }
 
+    /** 关闭当前查看器：有压缩包来源就先回到压缩包，否则退回文件列表 */
+    fun closeViewer() {
+        val back = archiveReturn
+        archiveReturn = null
+        viewer = if (back != null) Viewer.Archive(back.file, back.prefix) else null
+    }
+
     fun openWith(file: File, mode: OpenMode, origin: Offset = Offset.Zero) {
+        val ext = FileKinds.extensionOf(file)
+        // 矢量图与网页：用 WebView 渲染，比当文本打开更接近真实效果
+        if (ext in setOf("svg", "html", "htm", "xhtml") &&
+            mode != OpenMode.TEXT && mode != OpenMode.HEX && mode != OpenMode.ARCHIVE
+        ) {
+            viewer = Viewer.Web(file)
+            return
+        }
         when (mode) {
             OpenMode.TEXT -> {
                 editorOrigin = origin
@@ -307,6 +332,12 @@ fun MainScreen(
         } else {
             openWith(file, mode, origin)
         }
+    }
+
+    /** 从文件列表/搜索结果打开：先清掉压缩包来源，避免关掉查看器后莫名回到压缩包 */
+    fun openFromList(file: File, origin: Offset) {
+        archiveReturn = null
+        openFile(file, origin)
     }
 
     fun copyPath(path: String) {
@@ -387,7 +418,7 @@ fun MainScreen(
                             if (entry.isDir) {
                                 vm.navigate(entry.path)
                             } else {
-                                openFile(entry.file, origin)
+                                openFromList(entry.file, origin)
                             }
                         },
                         onLongPress = { index, entry, origin ->
@@ -415,7 +446,7 @@ fun MainScreen(
                         onClearSelection = { vm.clearSelection() },
                         // 顶栏工具
                         onRefreshActive = { vm.refresh() },
-                        onSearch = { vm.openSearch(); page = Page.Search },
+                        onSearch = { vm.openSearch(); searchOpen = true },
                         onSort = { sheet = SheetKind.Sort },
                         onSelectAll = { vm.selectAll() },
                         onInvertSelection = { vm.invertSelection() },
@@ -468,26 +499,11 @@ fun MainScreen(
                         }
                     )
 
-                    Page.Search -> SearchPage(
-                        state = searchState,
-                        onBack = { page = Page.Files },
-                        onQueryChange = { vm.updateQuery(it) },
-                        onSearch = { vm.startSearch() },
-                        onCancel = { vm.cancelSearch() },
-                        onResult = { entry ->
-                            page = Page.Files
-                            vm.revealPath(entry)
-                        },
-                        onModeChange = { vm.setSearchMode(it) },
-                        onContentResult = { hit ->
-                            page = Page.Files
-                            editorLine = hit.line
-                            editorOrigin = Offset.Zero
-                            editorTarget = hit.file
-                        }
-                    )
+                    Page.Search -> Unit
 
                     Page.Terminal -> TerminalPage(onBack = { page = Page.Files })
+
+                    Page.Changelog -> ChangelogPage(onBack = { page = Page.Settings })
 
                     Page.Settings -> SettingsPage(
                         prefs = prefs,
@@ -517,7 +533,8 @@ fun MainScreen(
                         },
                         onAbout = { dialog = DialogKind.About },
                         dataDir = remember { runCatching { com.suibian.sunfile.data.Mt2.root(context).absolutePath }.getOrDefault("") },
-                        onOpenWithManager = { sheet = SheetKind.OpenWithManager }
+                        onOpenWithManager = { sheet = SheetKind.OpenWithManager },
+                        onChangelog = { page = Page.Changelog }
                     )
                 }
             }
@@ -551,7 +568,7 @@ fun MainScreen(
                         icon = if (entry.isDir) Icons.Outlined.FolderOpen else Icons.Outlined.OpenInNew,
                         label = if (entry.isDir) "进入文件夹" else "打开"
                     ) {
-                        if (entry.isDir) vm.open(active, entry.path) else openFile(target, anchorPos)
+                        if (entry.isDir) vm.open(active, entry.path) else openFromList(target, anchorPos)
                     }
                 )
                 if (!entry.isDir) {
@@ -645,7 +662,7 @@ fun MainScreen(
             onDismiss = { sheet = null },
             onOpen = {
                 sheet = null
-                if (s.entry.isDir) vm.navigate(s.entry.path) else openFile(s.entry.file, Offset.Zero)
+                if (s.entry.isDir) vm.navigate(s.entry.path) else openFromList(s.entry.file, Offset.Zero)
             },
             onOpenWith = {
                 sheet = null
@@ -818,9 +835,9 @@ fun MainScreen(
 
         is DialogKind.Compress -> CompressDialog(
             paths = d.paths,
-            onConfirm = { name, format ->
+            onConfirm = { name, format, level, password ->
                 dialog = null
-                vm.compressAs(d.paths, name, format)
+                vm.compressAs(d.paths, name, format, level, password)
             },
             onDismiss = { dialog = null }
         )
@@ -930,6 +947,28 @@ fun MainScreen(
         }
     }
 
+    // 搜索弹窗
+    if (searchOpen) {
+        SearchDialog(
+            state = searchState,
+            onDismiss = { searchOpen = false },
+            onQueryChange = { vm.updateQuery(it) },
+            onSearch = { vm.startSearch() },
+            onCancel = { vm.cancelSearch() },
+            onResult = { entry ->
+                searchOpen = false
+                vm.revealPath(entry)
+            },
+            onModeChange = { vm.setSearchMode(it) },
+            onContentResult = { hit ->
+                searchOpen = false
+                editorLine = hit.line
+                editorOrigin = Offset.Zero
+                editorTarget = hit.file
+            }
+        )
+    }
+
     // 更新弹窗
     if (updateState !is UpdateState.Idle) {
         val st = updateState
@@ -942,7 +981,11 @@ fun MainScreen(
                 onInstall = { apk -> updateVm.install(apk) },
                 onOpenPermission = { updateVm.openPermissionSettings() },
                 onRetry = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
-                onDismiss = { updateVm.dismiss() }
+                onDismiss = { updateVm.dismiss() },
+                onHistory = {
+                    updateVm.dismiss()
+                    page = Page.Changelog
+                }
             )
         }
     }
@@ -982,21 +1025,25 @@ fun MainScreen(
                     }
                 }
                 vm.refreshAll()
+                val back = archiveReturn
+                archiveReturn = null
+                if (back != null) viewer = Viewer.Archive(back.file, back.prefix)
             }
         )
     }
 
     // 查看器
     when (val v = viewer) {
-        is Viewer.Hex -> HexEditorOverlay(v.file) { viewer = null }
-        is Viewer.Compare -> CompareOverlay(v.left, v.right) { viewer = null }
-        is Viewer.Reverse -> ReverseOverlay(v.file, v.tab) { viewer = null }
-        is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { viewer = null }
-        is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { viewer = null }
-        is Viewer.Video -> VideoViewerOverlay(v.file, v.playlist) { viewer = null }
+        is Viewer.Hex -> HexEditorOverlay(v.file) { closeViewer() }
+        is Viewer.Compare -> CompareOverlay(v.left, v.right) { closeViewer() }
+        is Viewer.Reverse -> ReverseOverlay(v.file, v.tab) { closeViewer() }
+        is Viewer.Web -> WebPreviewOverlay(v.file) { closeViewer() }
+        is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { closeViewer() }
+        is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { closeViewer() }
+        is Viewer.Video -> VideoViewerOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Doc -> DocumentViewerOverlay(
             file = v.file,
-            onClose = { viewer = null },
+            onClose = { closeViewer() },
             onOpenExternal = { f ->
                 viewer = null
                 if (!openExternally(context, f)) openWithTarget = f
@@ -1006,13 +1053,17 @@ fun MainScreen(
             file = v.file,
             destDir = panes[active].currentDir,
             opVersion = archiveVersion,
-            onClose = { viewer = null },
-            onExtractAll = {
+            initialPrefix = v.prefix,
+            onPrefixChange = { archivePrefix = it },
+            onClose = { closeViewer() },
+            onExtractAll = { pw ->
                 val dest = panes[active].currentDir
+                archiveReturn = null
                 viewer = null
-                vm.extractArchive(v.file, dest)
+                vm.extractArchive(v.file, dest, pw)
             },
             onOpenEntry = { temp, entryName ->
+                archiveReturn = ArchiveReturn(v.file, archivePrefix)
                 viewer = null
                 val mode = prefs.openWith[FileKinds.extensionOf(temp)] ?: FileKinds.defaultMode(temp)
                 if (mode == OpenMode.TEXT) {
@@ -1047,6 +1098,9 @@ fun MainScreen(
 
 /** 从压缩包打开的文件：编辑保存后据此写回条目 */
 private data class ZipEdit(val zip: File, val entry: String, val temp: File, val hash: String)
+
+/** 压缩包内的当前位置：文件 + 目录前缀 */
+private data class ArchiveReturn(val file: File, val prefix: String)
 
 private fun hashOf(file: File): String {
     val md = java.security.MessageDigest.getInstance("MD5")
@@ -2162,99 +2216,134 @@ private fun DrawerContent(
     )
     val existing = shortcuts.filter { File(it.second).isDirectory }
     ModalDrawerSheet(
-        drawerContainerColor = SunColors.Surface3,
-        drawerShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
-        modifier = Modifier.width(300.dp)
+        drawerContainerColor = SunColors.Surface1,
+        drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
+        modifier = Modifier.width(306.dp)
     ) {
         Column(Modifier.fillMaxHeight().statusBarsPadding()) {
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp)) {
+            // 头部固定：应用名 + 存储占用，滚动区只放导航
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.Folder,
-                        null,
-                        tint = SunColors.Accent,
-                        modifier = Modifier.size(26.dp)
-                    )
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(SunShapes.Small)
+                            .background(SunColors.Accent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("S", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    }
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("SunDocument", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                        Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 10.5.sp)
+                        Text("SunDocument", color = SunColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 10.sp)
                     }
                 }
-                Spacer(Modifier.height(15.dp))
-                Text(
-                    "${Fmt.size(storageUsed)} 已用 / ${Fmt.size(storageTotal)}",
-                    color = SunColors.TextSecondary,
-                    style = NumberStyle
-                )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(16.dp))
+                val free = (storageTotal - storageUsed).coerceAtLeast(0L)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        Fmt.size(storageUsed),
+                        color = SunColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        " 已用",
+                        color = SunColors.TextTertiary,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${Fmt.size(free)} 可用",
+                        color = SunColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(Modifier.height(7.dp))
                 LinearProgressIndicator(
                     progress = { if (storageTotal > 0) storageUsed.toFloat() / storageTotal else 0f },
-                    modifier = Modifier.fillMaxWidth().height(3.dp).clip(CircleShape),
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                     color = SunColors.Accent,
-                    trackColor = SunColors.Surface1
+                    trackColor = SunColors.Surface3
                 )
-            }
-
-            Text(
-                "快速访问",
-                color = SunColors.TextTertiary,
-                fontSize = 10.5.sp,
-                letterSpacing = 0.4.sp,
-                modifier = Modifier.padding(start = 20.dp, top = 6.dp, bottom = 6.dp)
-            )
-            existing.forEach { (label, path, icon) ->
-                DrawerItem(
-                    icon = icon,
-                    label = label,
-                    selected = currentPath == path,
-                    onClick = { onNavigate(path) }
-                )
-            }
-
-            if (recent.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(7.dp))
                 Text(
-                    "最近访问",
+                    "共 ${Fmt.size(storageTotal)}",
                     color = SunColors.TextTertiary,
-                    fontSize = 10.5.sp,
-                    letterSpacing = 0.6.sp,
-                    modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
+                    fontSize = 10.sp
                 )
-                recent.filter { it != currentPath }.take(4).forEach { path ->
+            }
+
+            Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
+
+            // 导航区可滚动：项目再多也不会把底部入口挤出屏幕
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                SectionLabel("快速访问")
+                existing.forEach { (label, path, icon) ->
                     DrawerItem(
-                        icon = Icons.Outlined.History,
-                        label = path.substringAfterLast('/').ifEmpty { "/" },
-                        selected = false,
+                        icon = icon,
+                        label = label,
+                        selected = currentPath == path,
                         onClick = { onNavigate(path) }
                     )
                 }
+
+                if (recent.isNotEmpty()) {
+                    SectionLabel("最近访问")
+                    recent.filter { it != currentPath }.take(4).forEach { path ->
+                        DrawerItem(
+                            icon = Icons.Outlined.History,
+                            label = compactPath(path),
+                            selected = false,
+                            onClick = { onNavigate(path) }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
+                Spacer(Modifier.height(6.dp))
+
+                DrawerItem(
+                    Icons.Outlined.BookmarkBorder,
+                    if (bookmarks.isEmpty()) "收藏夹" else "收藏夹（${bookmarks.size}）",
+                    false,
+                    onBookmarks
+                )
+                DrawerItem(Icons.Outlined.Terminal, "终端", false, onTerminal)
+                DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
+                DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
+                DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)
+                Spacer(Modifier.height(14.dp))
             }
 
-            Spacer(Modifier.height(8.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
-            Spacer(Modifier.height(5.dp))
-
-            DrawerItem(
-                Icons.Outlined.BookmarkBorder,
-                if (bookmarks.isEmpty()) "收藏夹" else "收藏夹（${bookmarks.size}）",
-                false,
-                onBookmarks
-            )
-            DrawerItem(Icons.Outlined.Terminal, "终端", false, onTerminal)
-            DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
-            DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
-            DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)
-
-            Spacer(Modifier.weight(1f))
             Text(
                 "github.com/suibian-sun/SunDocument",
                 color = SunColors.TextTertiary,
                 fontSize = 9.sp,
-                modifier = Modifier.padding(20.dp)
+                modifier = Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)
             )
         }
     }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = SunColors.TextTertiary,
+        fontSize = 10.sp,
+        letterSpacing = 0.4.sp,
+        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp)
+    )
 }
 
 @Composable
@@ -2281,7 +2370,9 @@ private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onCl
         Text(
             label,
             color = if (selected) SunColors.Accent else SunColors.TextPrimary,
-            fontSize = 13.sp
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -2330,7 +2421,7 @@ internal fun shareFiles(context: Context, files: List<File>): Boolean {
     return runCatching {
         val uris = ArrayList<android.net.Uri>(files.size)
         for (f in files) {
-            uris.add(FileProvider.getUriForFile(context, context.packageName + ".files", f))
+            uris.add(FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f))
         }
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
             type = "*/*"

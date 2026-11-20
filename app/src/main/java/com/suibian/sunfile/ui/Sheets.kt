@@ -54,6 +54,8 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -83,9 +85,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.suibian.sunfile.data.Archives
 import com.suibian.sunfile.data.FileEntry
 import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.OpenMode
@@ -772,6 +778,7 @@ fun SunTextField(
     label: String,
     modifier: Modifier = Modifier,
     mono: Boolean = false,
+    password: Boolean = false,
     imeAction: ImeAction = ImeAction.Done,
     onDone: () -> Unit = {}
 ) {
@@ -792,8 +799,12 @@ fun SunTextField(
             color = SunColors.TextPrimary,
             fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default
         ),
-        keyboardOptions = KeyboardOptions(imeAction = imeAction),
+        keyboardOptions = KeyboardOptions(
+            imeAction = imeAction,
+            keyboardType = if (password) KeyboardType.Password else KeyboardType.Text
+        ),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         interactionSource = interaction,
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = SunColors.Surface4,
@@ -936,24 +947,36 @@ fun PropertiesDialog(
 @Composable
 fun CompressDialog(
     paths: List<String>,
-    onConfirm: (String, com.suibian.sunfile.data.ArchiveEdit.Format) -> Unit,
+    onConfirm: (String, Archives.Format, Int, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     val stem = when (paths.size) {
         1 -> File(paths.first()).name.substringBeforeLast('.').ifEmpty { "archive" }
         else -> "archive"
     }
-    var format by remember { mutableStateOf(com.suibian.sunfile.data.ArchiveEdit.Format.ZIP) }
+    var format by remember { mutableStateOf(Archives.Format.ZIP) }
     var name by remember { mutableStateOf(stem) }
+    var level by remember { androidx.compose.runtime.mutableIntStateOf(6) }
+    var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    val levels = listOf(0 to "存储", 3 to "快速", 6 to "标准", 9 to "极限")
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SunColors.Surface4,
         shape = SunShapes.Medium,
-        title = { Text("压缩 ${paths.size} 项", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        title = {
+            Text(
+                "压缩 ${paths.size} 项",
+                color = SunColors.TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium
+            )
+        },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                // 格式
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    com.suibian.sunfile.data.ArchiveEdit.Format.entries.forEach { f ->
+                    Archives.Format.entries.forEach { f ->
                         val active = f == format
                         Text(
                             f.label,
@@ -975,16 +998,66 @@ fun CompressDialog(
                     modifier = Modifier.fillMaxWidth(),
                     mono = true
                 )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (format == com.suibian.sunfile.data.ArchiveEdit.Format.ZIP) "逐条写入，支持空目录" else "按 512 字节块写入，保留修改时间",
-                    color = SunColors.TextTertiary,
-                    fontSize = 9.sp
-                )
+
+                Spacer(Modifier.height(14.dp))
+                Text("压缩级别", color = SunColors.TextTertiary, fontSize = 10.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    levels.forEach { (v, label) ->
+                        val active = v == level
+                        Text(
+                            label,
+                            color = if (active) SunColors.Surface1 else SunColors.TextSecondary,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .clip(SunShapes.Small)
+                                .background(if (active) SunColors.Accent else SunColors.Surface3)
+                                .clickable { level = v }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                if (format == Archives.Format.ZIP) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("密码", color = SunColors.TextTertiary, fontSize = 10.sp)
+                            Spacer(Modifier.height(5.dp))
+                            SunTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = "留空则不加密",
+                                password = !showPassword,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                            "显示密码",
+                            tint = SunColors.TextTertiary,
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clickable { showPassword = !showPassword }
+                                .padding(5.dp)
+                        )
+                    }
+                    Text(
+                        "AES-256 加密，7-Zip / MT 管理器均可直接解压",
+                        color = SunColors.TextTertiary,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(top = 5.dp)
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), format) }) {
+            TextButton(onClick = {
+                if (name.isNotBlank()) {
+                    onConfirm(name.trim(), format, level, password.ifBlank { null })
+                }
+            }) {
                 Text("开始", color = SunColors.Accent, fontSize = 13.sp)
             }
         },

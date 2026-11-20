@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.0.8"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 16
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.1.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 17
 
 android {
     namespace = "com.suibian.sunfile"
@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.suibian.sunfile"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = appVersionCode
         versionName = appVersionName
@@ -91,6 +91,14 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+
+    // 压缩包：7z / xz / bzip2 的读写（纯 Java，minSdk 26 起无兼容问题）
+    implementation("org.apache.commons:commons-compress:1.25.0")
+    implementation("org.tukaani:xz:1.9")
+    // ZIP 的 AES-256 / ZipCrypto 读写（密码保护）
+    implementation("net.lingala.zip4j:zip4j:2.11.5")
+    // RAR 只读
+    implementation("com.github.junrar:junrar:7.5.5")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -167,6 +167,11 @@ fun FileTypeBadge(
         return
     }
     val ext = FileKinds.extensionOf(file)
+    val mark = if (kind == FileKind.TEXT || kind == FileKind.BINARY) langMarkOf(ext) else null
+    if (mark != null) {
+        LangBadge(mark, size, modifier)
+        return
+    }
     PageBadge(
         label = labelOf(ext),
         color = extColor(ext, kind),

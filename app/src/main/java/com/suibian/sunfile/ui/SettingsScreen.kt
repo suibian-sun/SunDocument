@@ -72,7 +72,8 @@ fun SettingsPage(
     onRequestRoot: () -> Unit,
     onAbout: () -> Unit,
     dataDir: String = "",
-    onOpenWithManager: () -> Unit = {}
+    onOpenWithManager: () -> Unit = {},
+    onChangelog: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -108,6 +109,7 @@ fun SettingsPage(
             SwitchRow("启动时检查更新", "打开应用后自动读取 GitHub Release", prefs.autoCheckUpdate, onToggleAutoCheck)
             SwitchRow("下载加速", "优先使用公共镜像线路，失败自动回退", prefs.useAccelerator, onToggleAccelerator)
             ValueRow("立即检查更新", "当前 v${BuildConfig.VERSION_NAME}", onCheckUpdate)
+            ValueRow("历史更新", "查看每个版本改了什么", onChangelog)
 
             SectionTitle("编辑器")
             ValueRow(
@@ -143,13 +145,11 @@ fun SettingsPage(
 
             SectionTitle("打开方式")
             ValueRow("默认打开方式", "${prefs.openWith.size} 个类型已指定 · 点击管理", onOpenWithManager)
-            InfoRow("记住的选择", "面板里勾选或长按即可按扩展名记住")
             ValueRow("清除记住的打开方式", "恢复为按类型自动判断", onClearOpenWith)
             ValueRow("清除最近访问", "${prefs.recent.size} 条记录", onClearRecent)
 
             SectionTitle("数据目录")
             InfoRow("SunMT2", dataDir.ifEmpty { "初始化中…" })
-            InfoRow("内容", "openMethod 默认打开方式、logs/DEBUG.log 崩溃日志")
 
             SectionTitle("关于")
             ValueRow("版本", "v${BuildConfig.VERSION_NAME}", onAbout)
@@ -250,7 +250,8 @@ fun UpdateDialog(
     onInstall: (File) -> Unit,
     onOpenPermission: () -> Unit,
     onRetry: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onHistory: () -> Unit = {}
 ) {
     if (state is UpdateState.Idle) return
     AlertDialog(
@@ -306,20 +307,26 @@ fun UpdateDialog(
                             style = NumberStyle,
                             modifier = Modifier.padding(top = 3.dp)
                         )
-                        Spacer(Modifier.height(10.dp))
-                        Text("更新说明", color = SunColors.TextSecondary, fontSize = 10.5.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            state.info.notes.take(1200),
-                            color = SunColors.TextSecondary,
-                            fontSize = 10.5.sp,
-                            lineHeight = 16.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(SunShapes.Small)
-                                .background(SunColors.Bg)
-                                .padding(9.dp)
-                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("更新内容", color = SunColors.TextPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                "历史记录",
+                                color = SunColors.Accent,
+                                fontSize = 10.5.sp,
+                                modifier = Modifier
+                                    .clip(SunShapes.Small)
+                                    .clickable { onHistory() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        val notes = state.info.notes.ifBlank {
+                            com.suibian.sunfile.data.Changelog.of(state.info.version)
+                                ?.items?.joinToString("\n") { "- $it" } ?: ""
+                        }
+                        NotesBlock(notes)
                     }
 
                     is UpdateState.Downloading -> {
@@ -458,6 +465,49 @@ private fun ThemeSegmented(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
                     color = if (active) SunColors.TextPrimary else SunColors.TextTertiary,
                     fontSize = 12.sp,
                     fontWeight = if (active) FontWeight.Medium else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+
+/** 更新说明按行渲染：以 # 开头当小标题，- / * 当列表项，其余为正文 */
+@Composable
+private fun NotesBlock(notes: String) {
+    val lines = notes.lines().map { it.trimEnd() }.filter { it.isNotBlank() }.take(200)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(SunShapes.Small)
+            .background(SunColors.Bg)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        if (lines.isEmpty()) {
+            Text("本次更新未提供说明。", color = SunColors.TextTertiary, fontSize = 10.5.sp)
+            return@Column
+        }
+        lines.forEach { raw ->
+            val head = raw.startsWith("#")
+            val bullet = raw.startsWith("- ") || raw.startsWith("* ") || raw.startsWith("• ")
+            val text = raw.removePrefix("#").removePrefix("- ").removePrefix("* ").removePrefix("• ").trim()
+            Row(Modifier.padding(vertical = if (head) 4.dp else 2.dp)) {
+                if (bullet) {
+                    Box(
+                        Modifier
+                            .padding(top = 6.dp)
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(SunColors.Accent)
+                    )
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(
+                    text,
+                    color = if (head) SunColors.TextPrimary else SunColors.TextSecondary,
+                    fontSize = if (head) 11.5.sp else 10.5.sp,
+                    fontWeight = if (head) FontWeight.Medium else FontWeight.Normal,
+                    lineHeight = 16.sp
                 )
             }
         }

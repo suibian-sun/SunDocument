@@ -74,7 +74,12 @@ fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
     val overview by produceState<ApkOverview?>(null, file) {
         value = withContext(Dispatchers.IO) { readOverview(context, file) }
     }
-    val manifest by produceState<String?>(null, file) {
+    // 按页签懒解析：只看概览时不反编译 Manifest，也不扫 dex
+    val manifest by produceState<String?>(null, file, tab) {
+        if (tab < 1) {
+            value = null
+            return@produceState
+        }
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val bytes = FileRepo.readZipEntry(file, "AndroidManifest.xml", 8 * 1024 * 1024)
@@ -82,13 +87,17 @@ fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
             }.getOrElse { "反编译失败：${it.message}" }
         }
     }
-    val dex by produceState<DexIndex.DexFile?>(null, file) {
+    val dex by produceState<DexIndex.DexFile?>(null, file, tab) {
+        if (tab != 2) {
+            value = null
+            return@produceState
+        }
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val name = FileRepo.zipEntries(file)
                     .firstOrNull { it.name.matches(Regex("classes\\d*\\.dex")) }
                     ?.name ?: "classes.dex"
-                val bytes = FileRepo.readZipEntry(file, name, 24 * 1024 * 1024)
+                val bytes = FileRepo.readZipEntry(file, name, 8 * 1024 * 1024)
                 DexIndex.read(bytes)
             }.getOrNull()
         }

@@ -687,15 +687,20 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- 压缩包 ----------------
 
-    fun extractArchive(archive: File, destDir: File, onDone: () -> Unit = {}) {
+    fun extractArchive(
+        archive: File,
+        destDir: File,
+        password: String? = null,
+        onDone: () -> Unit = {}
+    ) {
         if (_busy.value != null) return
         viewModelScope.launch {
             _busy.value = OpState("正在解压…", "", 0, 0)
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    FileRepo.extractArchive(archive, destDir) { name, done, total ->
+                    FileRepo.extractArchive(archive, destDir, { name, done, total ->
                         _busy.value = OpState("正在解压…", name, done.toLong(), total.toLong())
-                    }
+                    }, password)
                 }
             }
             _busy.value = null
@@ -727,11 +732,13 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 按选定格式创建压缩包：zip / tar / tar.gz */
+    /** 按选定格式创建压缩包：zip / 7z / tar / tar.gz，可设级别与密码 */
     fun compressAs(
         paths: List<String>,
         name: String,
-        format: com.suibian.sunfile.data.ArchiveEdit.Format,
+        format: com.suibian.sunfile.data.Archives.Format,
+        level: Int = 6,
+        password: String? = null,
         onDone: () -> Unit = {}
     ) {
         if (paths.isEmpty() || _busy.value != null) return
@@ -743,7 +750,13 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val dest = FileRepo.uniqueTarget(destDir, fileName)
-                    com.suibian.sunfile.data.ArchiveEdit.create(paths.map { File(it) }, dest, format) { n, done, total ->
+                    com.suibian.sunfile.data.Archives.create(
+                        paths.map { File(it) },
+                        dest,
+                        format,
+                        level,
+                        password
+                    ) { n, done, total ->
                         _busy.value = OpState("正在打包…", n, done.toLong(), total.toLong())
                     }
                 }
