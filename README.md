@@ -310,7 +310,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.6.0 -PappVersionCode=22
+./gradlew assembleRelease -PappVersionName=1.6.1 -PappVersionCode=23
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -321,7 +321,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.6.0 && git push origin v1.6.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.6.1 && git push origin v1.6.1`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -356,6 +356,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.6.1 | 深炭灰暗色主题（非纯黑磨砂质感）与纯白亮色主题（极致对比、留白呼吸感）；聚焦栏明暗分层；分割线暗色消隐、亮色锐利 |
 | 1.6.0 | Smali 编辑（反汇编 classesN.dex、改完汇编回写、自动重签）；插件 `libs/*.jar` 支持（class 解析 + JVM 字节码解释器） |
 | 1.5.0 | MT 插件直装直用（Java 源码解释器 + `bin.mt.plugin.api` 宿主实现，翻译引擎 / 设置界面 / 本地化文本）；清单编辑（AXML 回编译并写回 APK）；APK 重签名（v1+v2+v3，运行时自签证书） |
 | 1.4.0 | 资源表编辑器（读类型/条目/限定符，改字符串与整数并写回 APK）；点九图编辑器（补丁线可视化、保存回 .9.png）；MCP 服务（本机 JSON-RPC，9 个文件工具）；界面分析（无障碍控件树，可导出）；设置新增「开发者」分组 |

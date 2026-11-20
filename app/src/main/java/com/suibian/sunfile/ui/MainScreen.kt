@@ -1775,9 +1775,11 @@ private fun PaneView(
     onUp: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    // 聚焦栏用底色区分：暗色下抬一层、亮色下压一层，不靠彩色线条
+    // 聚焦栏用底色区分：暗色下抬一层（Surface1 比 Bg 亮 ~3%），亮色下压一层（Surface2 微灰），不靠彩色线条
     val bg by animateColorAsState(
-        targetValue = if (active) SunColors.Surface1 else Color.Transparent,
+        targetValue = if (active) {
+            if (SunColors.dark) SunColors.Surface1 else SunColors.Surface2
+        } else Color.Transparent,
         animationSpec = tween(Motion.Slow, easing = Motion.EaseOut),
         label = "paneBg"
     )

@@ -361,7 +361,7 @@ fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
         title = current.name,
         subtitle = "${index + 1} / ${list.size} · ${Fmt.size(current.length())}",
         onClose = onClose,
-        background = Color(0xFF050608),
+        background = Color(0xFF121316),
         actions = {
             IconButton(onClick = { exifFor = current }, modifier = Modifier.size(42.dp)) {
                 Icon(

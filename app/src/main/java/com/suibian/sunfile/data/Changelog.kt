@@ -17,6 +17,18 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.6.1",
+            date = "2026-11-21",
+            title = "深炭灰与纯白的材质重做",
+            items = listOf(
+                "暗色主题改为深炭灰（非纯黑）：带微弱明度的深灰呈现磨砂质感，低流明不刺眼",
+                "聚焦栏暗色抬一层、亮色压一层，列表内容悬浮在暗色空间前端",
+                "暗色分割线与底色融合，边界消隐；亮色分割线锐利清晰，秩序分明",
+                "亮色文字对比度拉到最极端，纯白画布上信息一目了然",
+                "图片查看器深色背景统一为深炭灰，不再是纯黑"
+            )
+        ),
+        ChangeEntry(
             version = "1.6.0",
             date = "2026-11-20",
             title = "Smali 编辑与 jar 插件",

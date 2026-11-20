@@ -70,19 +70,22 @@ data class SunPalette(
 
 val DarkPalette = SunPalette(
     dark = true,
-    // MT 的深色：近黑底 + 一支偏冷的灰阶，强调色是饱和度较高的蓝
-    Bg = Color(0xFF0E0E0F),
-    Surface1 = Color(0xFF1A1A1B),
-    Surface2 = Color(0xFF212122),
-    Surface3 = Color(0xFF28282A),
-    Surface4 = Color(0xFF323234),
-    Hairline = Color(0xFF2C2C2E),
-    TextPrimary = Color(0xFFE6E8EA),
-    TextSecondary = Color(0xFF9A9DA1),
-    TextTertiary = Color(0xFF6E7176),
-    Accent = Color(0xFF3B86F7),
-    AccentSoft = Color(0x333B86F7),
-    AccentLine = Color(0xFF2C5F9E),
+    // 深炭灰：不是 OLED 纯黑，而是带微弱明度的深灰（L*≈10）。
+    // 屏幕上呈现磨砂玻璃 / 暗夜石材的微颗粒质感，低流明杜绝眩光。
+    // 与 Surface1 之间约 3% 明度差营造「后退感」——列表内容悬浮在暗色空间前端。
+    Bg = Color(0xFF1B1C1E),
+    Surface1 = Color(0xFF222326),
+    Surface2 = Color(0xFF28292C),
+    Surface3 = Color(0xFF2F3034),
+    Surface4 = Color(0xFF37383C),
+    // 分割线与底色几乎同明度 → 边界消隐，布局连贯不被打断
+    Hairline = Color(0xFF222326),
+    TextPrimary = Color(0xFFE8E9EB),
+    TextSecondary = Color(0xFF9B9EA3),
+    TextTertiary = Color(0xFF6B6E74),
+    Accent = Color(0xFF4A90F7),
+    AccentSoft = Color(0x334A90F7),
+    AccentLine = Color(0xFF2F6AB8),
     Folder = Color(0xFFF0B23E),
     File = Color(0xFF7E8895),
     Danger = Color(0xFFE5534B),
@@ -99,18 +102,22 @@ val DarkPalette = SunPalette(
 
 val LightPalette = SunPalette(
     dark = false,
+    // 极致纯白：高级铜版纸 / 白瓷的平滑质感。
+    // 高流明漫反射 + 深色文字 = 最极端明暗对比，信息获取效率拉满。
+    // 大面积留白（Negative Space）带来呼吸感与轻量化极简美学。
     Bg = Color(0xFFFFFFFF),
     Surface1 = Color(0xFFFFFFFF),
-    Surface2 = Color(0xFFF6F7F8),
-    Surface3 = Color(0xFFEDEEF0),
+    Surface2 = Color(0xFFF7F8FA),
+    Surface3 = Color(0xFFEEF0F3),
     Surface4 = Color(0xFFFFFFFF),
-    Hairline = Color(0xFFE8E9EB),
-    TextPrimary = Color(0xFF1A1B1D),
-    TextSecondary = Color(0xFF8A8D91),
-    TextTertiary = Color(0xFFA0A3A7),
-    Accent = Color(0xFF1E6FD9),
-    AccentSoft = Color(0x1F1E6FD9),
-    AccentLine = Color(0xFFAECBF5),
+    // 浅色分割线在纯白画布上清晰锐利 → 绝对切割与秩序感
+    Hairline = Color(0xFFE2E4E8),
+    TextPrimary = Color(0xFF0F1114),
+    TextSecondary = Color(0xFF565B62),
+    TextTertiary = Color(0xFF8B9098),
+    Accent = Color(0xFF1565D8),
+    AccentSoft = Color(0x1F1565D8),
+    AccentLine = Color(0xFFA8C4F0),
     Folder = Color(0xFFE9A63C),
     File = Color(0xFF6B7580),
     Danger = Color(0xFFD1362D),
