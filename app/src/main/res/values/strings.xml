@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">SunDocument</string>
+    <string name="inspect_title">界面分析</string>
+    <string name="inspect_desc">读取当前界面的控件树，用于定位布局与编写自动化脚本。只在手动抓取时读取，不上传任何数据。</string>
     <color name="bg">#FFF2F2F2</color>
     <color name="accent">#FF1F6FEB</color>
 </resources>

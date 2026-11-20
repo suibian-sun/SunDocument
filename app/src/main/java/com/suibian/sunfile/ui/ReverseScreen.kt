@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.suibian.sunfile.data.Arsc
 import com.suibian.sunfile.data.Axml
 import com.suibian.sunfile.data.DexIndex
 import com.suibian.sunfile.data.FileRepo
@@ -67,7 +68,12 @@ private data class ApkOverview(
 
 /** APK 逆向面板：概览 / Manifest 反编译 / dex 结构浏览 */
 @Composable
-fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
+fun ReverseOverlay(
+    file: File,
+    startTab: Int = 0,
+    onEditResources: (ArscSource) -> Unit = {},
+    onClose: () -> Unit
+) {
     val context = LocalContext.current
     var tab by remember(file) { mutableStateOf(startTab) }
 
@@ -85,6 +91,18 @@ fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
                 val bytes = FileRepo.readZipEntry(file, "AndroidManifest.xml", 8 * 1024 * 1024)
                 Axml.decode(bytes)
             }.getOrElse { "反编译失败：${it.message}" }
+        }
+    }
+    val arsc by produceState<Arsc.Table?>(null, file, tab) {
+        if (tab != 3) {
+            value = null
+            return@produceState
+        }
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = FileRepo.readZipEntry(file, "resources.arsc", 64L * 1024 * 1024)
+                Arsc.parse(bytes)
+            }.getOrNull()
         }
     }
     val dex by produceState<DexIndex.DexFile?>(null, file, tab) {
@@ -109,7 +127,7 @@ fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
         onClose = onClose,
         actions = {
             Row(Modifier.padding(end = 8.dp)) {
-                listOf("概览", "Manifest", "DEX").forEachIndexed { i, label ->
+                listOf("概览", "Manifest", "DEX", "资源").forEachIndexed { i, label ->
                     Text(
                         label,
                         color = if (tab == i) SunColors.Accent else SunColors.TextTertiary,
@@ -131,7 +149,8 @@ fun ReverseOverlay(file: File, startTab: Int = 0, onClose: () -> Unit) {
         when (tab) {
             0 -> OverviewTab(overview, file)
             1 -> MonoTextTab(manifest)
-            else -> DexTab(dex)
+            2 -> DexTab(dex)
+            else -> ResourcesTab(arsc) { onEditResources(ArscSource(file, "resources.arsc")) }
         }
     }
 }
@@ -427,4 +446,45 @@ private object HexDigest {
     private fun digest(bytes: ByteArray, algo: String): String = runCatching {
         java.security.MessageDigest.getInstance(algo).digest(bytes).joinToString("") { "%02x".format(it) }
     }.getOrDefault("")
+}
+
+/** 资源表概览：类型 → 条目数，底部给一个直接进编辑器的入口 */
+@Composable
+private fun ResourcesTab(table: Arsc.Table?, onEdit: () -> Unit) {
+    if (table == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(Modifier.size(22.dp), color = SunColors.Accent, strokeWidth = 2.dp)
+        }
+        return
+    }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            InfoCell("类型", "${table.entries.map { it.kind }.distinct().size}", Modifier.weight(1f))
+            InfoCell("条目", "${table.entries.size}", Modifier.weight(1f))
+            InfoCell("字符串", "${table.strings.size}", Modifier.weight(1f))
+        }
+        Box(Modifier.weight(1f)) { ArscTypeSummary(table.entries) }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Text(
+                "编辑资源表",
+                color = SunColors.TextPrimary,
+                fontSize = 12.5.sp,
+                modifier = Modifier
+                    .background(SunColors.Accent, androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                    .clickable(onClick = onEdit)
+                    .padding(horizontal = 16.dp, vertical = 9.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun InfoCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(value, color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = SunColors.TextTertiary, fontSize = 9.5.sp)
+    }
 }

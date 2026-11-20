@@ -50,7 +50,9 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 | 音频 | **屏幕居中的播放器卡片**：封面、进度、上一首 / 下一首、暂停续播；点遮罩不关闭，只能点关闭或按返回 |
 | Word / Excel / PPT | **内置文档查看器**：docx / xlsx / pptx / odt / ods / odp / csv / tsv 直接读文字与表格，可切工作表；旧版 doc/xls 走系统应用 |
 | zip / 7z / rar / tar / tar.gz / tar.bz2 / tar.xz / gz / bz2 / xz | 内置压缩包浏览器，逐层进入；**点文件直接解压到缓存并进入编辑器 / 打开方式**；加密包就地输入密码；**从包内打开文件后返回仍在原来的目录层级** |
-| apk | 打开方式面板另含 **安装包信息**（包名 / 版本 / 签名证书 / 权限 / 组件 / ABI / dex 列表）、**AXML 反编译**（AndroidManifest 还原为文本）、**Dex 结构浏览**（类 → 方法 / 字段 / 字符串） |
+| apk | 打开方式面板另含 **安装包信息**（包名 / 版本 / 签名证书 / 权限 / 组件 / ABI / dex 列表）、**AXML 反编译**（AndroidManifest 还原为文本）、**Dex 结构浏览**（类 → 方法 / 字段 / 字符串）、**资源表编辑** |
+| .9.png | **点九图编辑器**：四边补丁线放大成格子，点一下切换拉伸区 / 内容留白 |
+| .arsc | **资源表编辑器**：按类型列出条目，可改字符串与整数 |
 | pdf | 调系统应用；没有可用应用时弹「打开方式」 |
 | 未知类型 / 二进制 | 仿 MT 的**打开方式网格**：三列彩色方块（文本 / 十六进制 / 图片 / 压缩包 / 其他应用），长按任一项直接设为该扩展名的默认；底部左「类型」管理已记住的映射，右「关闭」退出 |
 
@@ -162,6 +164,46 @@ icon.png           可选，图标
 
 安装入口：设置 → 插件 → 安装；空列表时可以直接装一个示例插件试手感。
 
+## 资源表与点九图
+
+**resources.arsc**：按 AOSP 的二进制布局解析表头、全局字符串池、包、类型与条目，
+把 `@0x7f…` 还原成 `类型/名称`，限定符写成 `zh-rCN-hdpi-v26` 这种可读形式。
+条目详情里可以改字符串（重建字符串池，保持下标不变）、整数、十六进制、布尔、颜色与引用；
+改的是 APK 里的条目时，保存会把整个 zip 重写一遍——**签名随之失效，需要重新签名**。
+
+用法：APK → 打开方式 → 资源表编辑；或直接点开磁盘上的 `.arsc`。逆向面板也有一页「资源」概览。
+
+**点九图**：`npTc` 块保存拉伸区，四边各 1 像素保存拉伸与留白标记。
+编辑器把 1 像素的边放大成 20dp 宽的格子，点格子切换黑点，
+右下留白与整条拉伸有快捷按钮，保存时重新编码 PNG 并在 IHDR 后写回 `npTc`。
+
+## MCP 服务
+
+设置 → 开发者 → MCP 服务。打开后会绑定 `127.0.0.1`（外部设备无法直连），
+用 JSON-RPC 2.0 over HTTP 暴露一组文件工具，端点 `http://127.0.0.1:8686/mcp`，
+请求头带 `Authorization: Bearer <令牌>`。页面里能复制现成的客户端配置、换令牌、看请求记录。
+
+| 工具 | 作用 |
+| --- | --- |
+| `device_info` | 型号、系统版本、存储、Root 状态 |
+| `list_dir` | 列目录；普通 API 读不到时自动退回 shell |
+| `read_file` / `write_file` | 读写文本，二进制用 base64 |
+| `file_info` | 大小、时间、权限、可读性 |
+| `search` | 按名称递归搜索，可选内容包含 |
+| `archive_list` | 列 zip / 7z / rar / tar 内容 |
+| `shell` | 执行命令，可选 `as_root` |
+| `copy_path` | 复制或移动 |
+| `read_package` | 读 APK 包名、版本、SDK、权限数 |
+
+电脑上连接：`adb forward tcp:8686 tcp:8686`，再把上面的地址粘进客户端即可。
+
+## 界面分析
+
+设置 → 开发者 → 界面分析。基于无障碍服务读取当前窗口的控件树：
+类名、资源 id、文本、描述、屏幕坐标、可点 / 可滚 / 可用状态，共 4000 个节点上限。
+右上角「抓取」带 3 秒倒计时，够切到目标应用；列表可按文本、id 或类名过滤，
+整棵树或单个节点都能导出成 XML 文本。服务只在点抓取时读一次，不做后台监听。
+
 ## 回收站
 
 删除默认进回收站（`Android/data/com.suibian.sunfile/files/trash`），保留 30 天；
@@ -196,7 +238,7 @@ icon.png           可选，图标
 
 - Kotlin 1.9.24 / AGP 8.5.2 / Gradle 8.7 / JDK 17
 - Jetpack Compose（BOM 2024.06.00）+ Material 3，亮/暗双主题
-- minSdk 24，targetSdk 34，compileSdk 34
+- minSdk 26，targetSdk 34，compileSdk 34
 - 文件读写基于 `java.io.File` + `MANAGE_EXTERNAL_STORAGE`，受限目录走 `su` shell 后端，压缩包基于 `java.util.zip`
 
 ## 目录结构
@@ -233,7 +275,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.3.0 -PappVersionCode=19
+./gradlew assembleRelease -PappVersionName=1.4.0 -PappVersionCode=20
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -244,7 +286,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.3.0 && git push origin v1.3.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.4.0 && git push origin v1.4.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -255,6 +297,7 @@ export ANDROID_HOME=/path/to/android-sdk
 - `READ / WRITE_EXTERNAL_STORAGE`：Android 6–10 运行时权限
 - `REQUEST_INSTALL_PACKAGES`：应用内更新安装
 - `INTERNET` / `ACCESS_NETWORK_STATE`：检查更新与下载
+- `BIND_ACCESSIBILITY_SERVICE`：界面分析（服务声明里的系统级权限，需用户在设置中手动开启）
 
 ## 已知限制
 
@@ -264,7 +307,10 @@ export ANDROID_HOME=/path/to/android-sdk
 - 超过 12 万字的文本自动关闭整篇着色与补全（整段重排已经很重，优先保证输入流畅）；打开超过 32 MB 的文件会提示改用十六进制编辑器。
 - 分段载入的超长文件暂不支持撤销 / 重做，避免与未载入的尾部错位。
 - 十六进制编辑器单次最多载入 6 MB；更大的文件只读浏览，保存按钮会隐藏，避免只写回前半段。
-- **逆向部分只做到「看」**：AndroidManifest 反编译、dex 类 / 方法 / 字段 / 字符串浏览、APK 签名与组件信息；Smali 编辑、`resources.arsc` 编辑、AXML 回编译、APK 重签名需要完整的反编译与签名工具链，不在本应用范围内。
+- **逆向部分做到「看 + 改资源」**：AndroidManifest 反编译、dex 浏览、签名与组件信息、资源表读写；
+  Smali 编辑、AXML 回编译、APK 重签名仍需要完整工具链，不在本应用范围内。改过 APK 内的资源后，安装前必须重新签名。
+- **插件只实现了宿主侧约定**：`.mtp` 的 manifest、脚本动作与 `run(Context, List<File>)` 反射调用是自己定的，
+  与 MT 官方 `bin.mt.plugin.api` 的类与方法签名并不完全一致，MT 插件不能直接拿来装。
 - 最低支持 Android 8.0（API 26）：7z / xz 解码依赖 `java.nio.file`，低版本无法保证稳定。
 - 编辑器暂不支持多文件标签页（MT 的「保留文件」），关闭时会提示保存；终端直接调用系统 `sh`，没有内置 bash / coreutils 扩展包，`ls -l` 等行为以系统自带实现为准。
 
@@ -272,6 +318,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.4.0 | 资源表编辑器（读类型/条目/限定符，改字符串与整数并写回 APK）；点九图编辑器（补丁线可视化、保存回 .9.png）；MCP 服务（本机 JSON-RPC，9 个文件工具）；界面分析（无障碍控件树，可导出）；设置新增「开发者」分组 |
 | 1.3.0 | Office 按内容识别（含老式 ppt/doc/xls）；PPT 分页排版；PDF 内置阅读器；压缩包返回先回上级；.mtp 插件体系；免 Root 浏览 Android/data 与 obb；系统信息页；HEX 对比可改字节；打开方式分页；音频封面；设置页精简 |
 | 1.2.0 | material-icon-theme 图标（1100+ 格式）；黑白配色对齐 MT；MT 式搜索面板（通配符/正则/大小/时间/内容/历史）；回收站（30 天）；PPT 内置预览（含 .ppt）；docx/pptx/xlsx 编辑；语法插件与命令面板；图标缩略图异步化；tar 分卷；图片 EXIF；网页/MD 打开方式 |
 | 1.1.0 | 7Z / RAR / BZ2 / XZ 读写与密码；压缩级别；压缩包内打开后返回原层级；侧边栏可滚动并显示可用空间；搜索改弹窗；语言图标；音乐居中；大文件防护；更新历史页；终端 Root；MT 配色 |

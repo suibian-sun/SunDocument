@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
             runCatching { com.suibian.sunfile.data.IconTheme.ensureLoaded(activity) }
             // 回收站 30 天到期清理，放在启动线程里，不占首帧
             runCatching { com.suibian.sunfile.data.Trash.purgeExpired(activity) }
+            // 上次开着 MCP 服务的话，随应用一起恢复监听
+            runCatching { com.suibian.sunfile.data.Mcp.autoStart(activity) }
         }
         val prefsStore = PrefsStore.get(activity)
         setContent {

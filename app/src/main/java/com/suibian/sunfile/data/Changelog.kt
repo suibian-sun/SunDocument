@@ -17,6 +17,18 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.4.0",
+            date = "2026-11-20",
+            title = "资源表、点九图与 MCP 服务",
+            items = listOf(
+                "资源表编辑器：读出 APK 里的类型、条目、限定符与值，字符串与整数可直接改，保存时写回安装包",
+                "点九图编辑器：四边补丁线放大成可点格子，上/左切拉伸区，右/下切留白，保存回 .9.png",
+                "MCP 服务：本机起一个 JSON-RPC 接口，AI 客户端能列目录、读写文件、搜索、执行命令",
+                "界面分析：读取当前界面的控件树，带 id、文本、坐标与可点状态，可导出",
+                "设置新增「开发者」分组，MCP 与界面分析都从这里进"
+            )
+        ),
+        ChangeEntry(
             version = "1.3.0",
             date = "2026-11-20",
             title = "PPT 内置预览、插件与免 Root 目录",

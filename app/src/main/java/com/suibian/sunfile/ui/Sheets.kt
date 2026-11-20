@@ -498,10 +498,13 @@ fun OpenWithSheet(
             else -> Unit
         }
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
+        if (file.name.lowercase().endsWith(".9.png")) add(OpenMode.NINEPATCH)
+        if (file.name.lowercase().endsWith(".arsc")) add(OpenMode.ARSC)
         if (kind == com.suibian.sunfile.data.FileKind.APK) {
             add(OpenMode.INFO)
             add(OpenMode.AXML)
             add(OpenMode.DEX)
+            add(OpenMode.ARSC)
         }
     }
     val edit = listOf(OpenMode.TEXT, OpenMode.HEX)
@@ -688,6 +691,8 @@ private fun modeColor(mode: OpenMode): Color = when (mode) {
     OpenMode.AXML -> Color(0xFF2E8B8B)
     OpenMode.DEX -> Color(0xFF4F8F8A)
     OpenMode.INFO -> Color(0xFF3FA45B)
+    OpenMode.ARSC -> Color(0xFF7C6BD6)
+    OpenMode.NINEPATCH -> Color(0xFF2F9E75)
     OpenMode.EXTERNAL -> Color(0xFF566573)
 }
 
@@ -764,6 +769,8 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.AXML -> Icons.Outlined.Code
     OpenMode.DEX -> Icons.Outlined.DataObject
     OpenMode.INFO -> Icons.Outlined.Android
+    OpenMode.ARSC -> Icons.Outlined.DataObject
+    OpenMode.NINEPATCH -> Icons.Outlined.Image
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
 

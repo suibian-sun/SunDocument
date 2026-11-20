@@ -17,6 +17,8 @@ enum class OpenMode(val label: String) {
     AXML("AXML 反编译"),
     DEX("Dex 结构浏览"),
     INFO("安装包信息"),
+    ARSC("资源表编辑"),
+    NINEPATCH("点九图编辑"),
     EXTERNAL("用其他应用打开")
 }
 
@@ -123,7 +125,12 @@ object FileKinds {
     }
 
     /** 默认打开方式；返回 null 表示类型未知，需要让用户选择 */
-    fun defaultMode(file: File): OpenMode? = when (kindOf(file)) {
+    fun defaultMode(file: File): OpenMode? {
+        val name = file.name.lowercase()
+        // 点九图与资源表有自己的编辑器，别落到普通图片查看器 / 十六进制里
+        if (name.endsWith(".9.png")) return OpenMode.NINEPATCH
+        if (name.endsWith(".arsc")) return OpenMode.ARSC
+        return when (kindOf(file)) {
         FileKind.DIR -> null
         FileKind.TEXT -> OpenMode.TEXT
         FileKind.IMAGE -> OpenMode.IMAGE
@@ -133,5 +140,6 @@ object FileKinds {
         FileKind.OFFICE -> OpenMode.DOCUMENT
         FileKind.PDF -> OpenMode.PDF
         FileKind.BINARY -> null
+        }
     }
 }

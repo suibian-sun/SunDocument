@@ -184,6 +184,8 @@ sealed interface Page {
     data object Saf : Page
     data object SysInfo : Page
     data object Plugins : Page
+    data object Mcp : Page
+    data object Inspect : Page
 }
 
 /** 内置全屏查看器 */
@@ -197,6 +199,8 @@ private sealed interface Viewer {
     data class Pdf(val file: File) : Viewer
     data class Compare(val left: File, val right: File) : Viewer
     data class Reverse(val file: File, val tab: Int = 0) : Viewer
+    data class Arsc(val source: ArscSource) : Viewer
+    data class NinePatch(val file: File) : Viewer
     data class Web(val file: File) : Viewer
 }
 
@@ -273,7 +277,10 @@ fun MainScreen(
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(enabled = drawerState.isClosed && page != Page.Files) {
-        page = if (page == Page.Changelog) Page.Settings else Page.Files
+        page = when (page) {
+            Page.Changelog, Page.Plugins, Page.Trash, Page.Mcp, Page.Inspect -> Page.Settings
+            else -> Page.Files
+        }
     }
     BackHandler(enabled = drawerState.isClosed && page == Page.Files && pane.selectionMode) {
         vm.clearSelection()
@@ -329,12 +336,21 @@ fun MainScreen(
             OpenMode.AXML -> viewer = Viewer.Reverse(file, 1)
             OpenMode.DEX -> viewer = Viewer.Reverse(file, 2)
             OpenMode.INFO -> viewer = Viewer.Reverse(file, 0)
+            OpenMode.ARSC -> viewer = Viewer.Arsc(
+                if (file.name.lowercase().endsWith(".apk")) ArscSource(file, "resources.arsc")
+                else ArscSource(file)
+            )
+            OpenMode.NINEPATCH -> viewer = Viewer.NinePatch(file)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
     }
 
     fun openFile(file: File, origin: Offset) {
         val ext = FileKinds.extensionOf(file)
+        if (file.name.lowercase().endsWith(".9.png")) {
+            viewer = Viewer.NinePatch(file)
+            return
+        }
         // 网页 / Markdown 由设置决定：询问、直接预览、直接编辑
         if (ext in setOf("html", "htm", "xhtml", "md", "markdown")) {
             when (prefs.htmlMode) {
@@ -566,6 +582,10 @@ fun MainScreen(
 
                     Page.Plugins -> PluginPage(onBack = { page = Page.Settings })
 
+                    Page.Mcp -> McpPage(onBack = { page = Page.Settings })
+
+                    Page.Inspect -> InspectPage(onBack = { page = Page.Settings })
+
                     Page.Trash -> {
                         val items = remember(trashTick) { vm.trashItems() }
                         TrashPage(
@@ -609,7 +629,9 @@ fun MainScreen(
                         onChangelog = { page = Page.Changelog },
                         onTrash = { page = Page.Trash },
                         onHtmlMode = { vm.prefsStore.setHtmlMode(it) },
-                        onPlugins = { page = Page.Plugins }
+                        onPlugins = { page = Page.Plugins },
+                        onMcp = { page = Page.Mcp },
+                        onInspect = { page = Page.Inspect }
                     )
                 }
             }
@@ -1177,7 +1199,14 @@ fun MainScreen(
     when (val v = viewer) {
         is Viewer.Hex -> HexEditorOverlay(v.file) { closeViewer() }
         is Viewer.Compare -> CompareOverlay(v.left, v.right) { closeViewer() }
-        is Viewer.Reverse -> ReverseOverlay(v.file, v.tab) { closeViewer() }
+        is Viewer.Reverse -> ReverseOverlay(
+            file = v.file,
+            startTab = v.tab,
+            onEditResources = { source -> viewer = Viewer.Arsc(source) },
+            onClose = { closeViewer() }
+        )
+        is Viewer.Arsc -> ArscOverlay(v.source) { closeViewer() }
+        is Viewer.NinePatch -> NinePatchOverlay(v.file) { closeViewer() }
         is Viewer.Web -> WebPreviewOverlay(v.file) { closeViewer() }
         is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { closeViewer() }
