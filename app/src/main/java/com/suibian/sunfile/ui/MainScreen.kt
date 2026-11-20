@@ -202,6 +202,7 @@ private sealed interface Viewer {
     data class Reverse(val file: File, val tab: Int = 0) : Viewer
     data class Arsc(val source: ArscSource) : Viewer
     data class AxmlEdit(val file: File, val entry: String = "AndroidManifest.xml") : Viewer
+    data class Smali(val file: File) : Viewer
     data class NinePatch(val file: File) : Viewer
     data class Web(val file: File) : Viewer
 }
@@ -344,6 +345,7 @@ fun MainScreen(
             )
             OpenMode.NINEPATCH -> viewer = Viewer.NinePatch(file)
             OpenMode.AXML_EDIT -> viewer = Viewer.AxmlEdit(file)
+            OpenMode.SMALI -> viewer = Viewer.Smali(file)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
     }
@@ -1214,6 +1216,12 @@ fun MainScreen(
         is Viewer.Arsc -> ArscOverlay(v.source) { closeViewer() }
         is Viewer.NinePatch -> NinePatchOverlay(v.file) { closeViewer() }
         is Viewer.AxmlEdit -> AxmlEditorOverlay(v.file, v.entry) { closeViewer() }
+        is Viewer.Smali -> SmaliOverlay(
+            apk = v.file,
+            prefs = prefs,
+            onEditorPrefs = { size, wrap, lines, comp -> vm.setEditorPrefs(size, wrap, lines, comp) },
+            onClose = { closeViewer() }
+        )
         is Viewer.Web -> WebPreviewOverlay(v.file) { closeViewer() }
         is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { closeViewer() }

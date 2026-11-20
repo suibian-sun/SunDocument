@@ -19,6 +19,7 @@ enum class OpenMode(val label: String) {
     INFO("安装包信息"),
     ARSC("资源表编辑"),
     AXML_EDIT("清单编辑"),
+    SMALI("Smali 编辑"),
     NINEPATCH("点九图编辑"),
     EXTERNAL("用其他应用打开")
 }

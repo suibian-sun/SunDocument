@@ -8,6 +8,7 @@ import com.suibian.sunfile.data.mtapi.MtContext
 import com.suibian.sunfile.data.mtapi.PrefItem
 import com.suibian.sunfile.data.mtapi.PreferenceBuilder
 import com.suibian.sunfile.data.mtjava.Interp
+import com.suibian.sunfile.data.mtjava.JarLoader
 import com.suibian.sunfile.data.mtjava.JObj
 import com.suibian.sunfile.data.mtjava.Lexer
 import com.suibian.sunfile.data.mtjava.MtRuntimeException
@@ -190,8 +191,20 @@ object MtPlugins {
             logs.add("语法解析失败 $failed")
             throw MtSyntaxException("插件源码无法解析：$failed")
         }
-        if (decls.isEmpty()) throw MtRuntimeException("插件里没有可执行的 Java 源码")
         interp.load(decls)
+        // libs 下的 jar：解成 class 直接进解释器，和源码类走同一套对象模型
+        val libs = File(plugin.dir, "libs")
+        if (libs.isDirectory) {
+            val jarClasses = runCatching { JarLoader.load(libs) }
+                .onFailure { logs.add("jar 读取失败：${it.message}") }
+                .getOrDefault(emptyList())
+            if (jarClasses.isNotEmpty()) {
+                runCatching { interp.loadClasses(jarClasses) }
+                    .onFailure { logs.add("jar 加载失败：${it.message}") }
+                logs.add("已载入 ${jarClasses.size} 个类（${libs.listFiles()?.count { it.name.endsWith(".jar", true) } ?: 0} 个 jar）")
+            }
+        }
+        if (decls.isEmpty() && interp.classes.isEmpty()) throw MtRuntimeException("插件里没有可执行的 Java 源码")
         return Loaded(plugin, interp, mtContext, ctxObj, logs)
     }
 

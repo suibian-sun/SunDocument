@@ -30,7 +30,11 @@ internal class JMethod(
     val params: List<Param>,
     val body: Block?,
     val isStatic: Boolean = false,
-    val native: ((Interp, JObj?, List<Any?>) -> Any?)? = null
+    val native: ((Interp, JObj?, List<Any?>) -> Any?)? = null,
+    /** jar 里 class 文件的字节码，和 body 二选一 */
+    val code: Bytecode? = null,
+    /** 字节码方法的描述符，用于重载匹配 */
+    val desc: String? = null
 )
 
 internal class JClass(val name: String) {
@@ -41,6 +45,12 @@ internal class JClass(val name: String) {
     val ctors = ArrayList<JMethod>()
     /** 实例字段的初始值表达式，构造时按父类到子类依次求值 */
     val fieldInits = ArrayList<Pair<String, Expr>>()
+    /** jar 类：字段名 → 描述符，new 时按类型填默认值 */
+    val fieldTypes = HashMap<String, String>()
+    /** <clinit> 是否已执行 */
+    var clinitDone = false
+    /** 来自 jar 的 class 文件 */
+    var bytecode = false
     /** 构造完成后挂宿主对象 */
     var hostFactory: ((JObj) -> Unit)? = null
     var initialized = false
@@ -131,6 +141,7 @@ internal class Interp {
         chain.reverse()
         for (c in chain) {
             for ((n, e) in c.fieldInits) obj.fields[n] = eval(e, Frame(obj, c))
+            for ((n, t) in c.fieldTypes) obj.fields[n] = V.defaultOf(descToType(t))
         }
         val ctor = cls.ctors.firstOrNull { it.params.size == args.size }
             ?: cls.ctors.firstOrNull()
@@ -171,6 +182,211 @@ internal class Interp {
         throw MtRuntimeException("${cls.name} 没有静态方法 $name")
     }
 
+    // ---------------------------------------------------------------- jar 里的字节码
+
+    /** 把解析好的 class 注册进类表；同名源码类优先，jar 只补缺 */
+    fun loadClasses(parsed: List<ParsedClass>) {
+        for (p in parsed) {
+            val name = p.name.replace('/', '.')
+            val c = classes[name] ?: JClass(name)
+            c.bytecode = true
+            p.superName?.let { c.superName = it.replace('/', '.') }
+            for (f in p.fields) {
+                c.fieldTypes[f.name] = f.desc
+                if (f.isStatic && !c.staticFields.containsKey(f.name)) {
+                    c.staticFields[f.name] = V.defaultOf(descToType(f.desc))
+                }
+            }
+            for (m in p.methods) {
+                val params = descParams(m.desc).mapIndexed { i, t -> Param(t, "arg$i") }
+                val jm = JMethod(m.name, params, null, m.isStatic, code = m.code, desc = m.desc)
+                if (m.name == "<init>") {
+                    c.ctors.add(jm)
+                } else if (m.name == "<clinit>") {
+                    c.methods.getOrPut("<clinit>") { ArrayList() }.add(jm)
+                } else {
+                    c.add(jm)
+                }
+            }
+            classes[name] = c
+        }
+        relink()
+    }
+
+    fun classByName(owner: String): JClass? {
+        val dotted = owner.removePrefix("L").removeSuffix(";").replace('/', '.')
+        return classes[dotted] ?: classes[dotted.substringAfterLast('.')]
+    }
+
+    private fun ensureClinit(c: JClass) {
+        if (c.clinitDone) return
+        c.clinitDone = true
+        val m = c.methods["<clinit>"]?.firstOrNull() ?: return
+        execMethod(m, null, c, emptyList())
+    }
+
+    fun getStatic(owner: String, name: String, desc: String): Any? {
+        val c = classByName(owner)
+        if (c != null) {
+            ensureClinit(c)
+            return if (c.staticFields.containsKey(name)) c.staticFields[name] else V.defaultOf(descToType(desc))
+        }
+        return Native.staticField(owner.replace('/', '.'), name)
+    }
+
+    fun putStatic(owner: String, name: String, desc: String, v: Any?) {
+        val c = classByName(owner)
+        if (c != null) {
+            ensureClinit(c)
+            c.staticFields[name] = V.coerce(descToType(desc), v)
+            return
+        }
+        Native.setStatic(owner.replace('/', '.'), name, v)
+    }
+
+    fun getField(target: Any?, owner: String, name: String, desc: String): Any? {
+        if (target == null) throw MtRuntimeException("在 null 上取字段 $name")
+        if (target is JObj) {
+            if (target.fields.containsKey(name)) return target.fields[name]
+            val nat = target.native
+            if (nat != null) {
+                val r = runCatching { Native.get(nat, name) }.getOrNull()
+                if (r != null) return r
+            }
+            return V.defaultOf(descToType(desc))
+        }
+        return Native.get(target, name)
+    }
+
+    fun putField(target: Any?, owner: String, name: String, desc: String, v: Any?) {
+        if (target == null) throw MtRuntimeException("在 null 上写字段 $name")
+        if (target is JObj) {
+            target.fields[name] = V.coerce(descToType(desc), v)
+            return
+        }
+        Native.set(target, name, v)
+    }
+
+    fun invokeVirtual(target: Any?, owner: String, name: String, desc: String, args: List<Any?>): Any? {
+        if (target == null) throw MtRuntimeException("在 null 上调用 $owner.$name（$desc）")
+        if (target is JObj) {
+            var c: JClass? = target.cls
+            while (c != null) {
+                val list = c.methods[name]
+                if (list != null) {
+                    val m = list.firstOrNull { it.desc == desc }
+                        ?: list.firstOrNull { it.params.size == args.size }
+                        ?: list.firstOrNull()
+                    if (m != null && (m.code != null || m.body != null || m.native != null)) {
+                        return execMethod(m, target, c, args)
+                    }
+                }
+                c = c.superClass
+            }
+            val nat = target.native
+            if (nat != null) return Native.call(nat, name, args)
+            throw MtRuntimeException("${target.cls.name} 没有方法 $name（$desc）")
+        }
+        return Native.call(target, name, args)
+    }
+
+    fun invokeSpecial(target: Any?, owner: String, name: String, desc: String, args: List<Any?>): Any? {
+        val ownerCls = classByName(owner)
+        if (name == "<init>") {
+            val shell = target as? JObj
+                ?: throw MtRuntimeException("构造 $owner 时缺少对象（desc=$desc，实际=${target?.javaClass?.simpleName}）")
+            val ctor = ownerCls?.ctors?.firstOrNull { it.desc == desc }
+                ?: ownerCls?.ctors?.firstOrNull { it.params.size == args.size }
+            if (ctor != null && ownerCls != null) return execMethod(ctor, shell, ownerCls, args)
+            // 宿主类的构造：new 时只是个壳，这里补上真实对象
+            if (shell.native == null) {
+                shell.native = Native.construct(owner.replace('/', '.'), args.map { V.unwrap(it) })
+            }
+            return null
+        }
+        if (target is JObj) {
+            val start = ownerCls ?: target.cls
+            var c: JClass? = start
+            while (c != null) {
+                val m = c.methods[name]?.firstOrNull { it.desc == desc }
+                    ?: c.methods[name]?.firstOrNull { it.params.size == args.size }
+                if (m != null) return execMethod(m, target, c, args)
+                c = c.superClass
+            }
+            val nat = target.native
+            if (nat != null) return Native.call(nat, name, args)
+            throw MtRuntimeException("${start.name} 没有方法 $name（$desc）")
+        }
+        return Native.call(target ?: throw MtRuntimeException("在 null 上调用 $name"), name, args)
+    }
+
+    fun invokeStatic(owner: String, name: String, desc: String, args: List<Any?>): Any? {
+        val c = classByName(owner)
+        if (c != null) {
+            ensureClinit(c)
+            var k: JClass? = c
+            while (k != null) {
+                val list = k.methods[name]
+                val m = list?.firstOrNull { it.desc == desc } ?: list?.firstOrNull { it.params.size == args.size }
+                if (m != null) return execMethod(m, null, k, args)
+                k = k.superClass
+            }
+        }
+        return Native.staticCall(owner.replace('/', '.'), name, args.map { V.unwrap(it) })
+    }
+
+    fun newObject(desc: String): Any? {
+        val c = classByName(desc)
+        if (c != null) {
+            ensureClinit(c)
+            val obj = JObj(c)
+            val chain = ArrayList<JClass>()
+            var k: JClass? = c
+            while (k != null) { chain.add(k); k = k.superClass }
+            chain.reverse()
+            for (x in chain) for ((n, t) in x.fieldTypes) obj.fields[n] = V.defaultOf(descToType(t))
+            return obj
+        }
+        return shell(desc)
+    }
+
+    /** 宿主类的占位：等 <init> 时再真正构造，之后字段与方法都转发给 native */
+    private val shells = HashMap<String, JClass>()
+
+    private fun shell(desc: String): JObj {
+        val name = desc.replace('/', '.').removePrefix("L").removeSuffix(";")
+        val c = shells.getOrPut(name) { JClass(name).also { it.bytecode = true } }
+        return JObj(c)
+    }
+
+    fun isInstance(v: Any?, desc: String): Boolean {
+        if (v == null) return false
+        if (desc.length == 1) return true
+        if (desc.startsWith("[")) return v is JArr || v is Array<*> || v.javaClass.isArray
+        val name = descToType(desc)
+        if (v is JObj) {
+            var c: JClass? = v.cls
+            while (c != null) {
+                if (c.name == name || ("L" + c.name.replace('.', '/') + ";") == desc) return true
+                if (c.superName == name) return true
+                c = c.superClass
+            }
+            val nat = v.native ?: return false
+            return Native.matches(nat.javaClass, name)
+        }
+        return name == "java.lang.Object" || Native.matches(v.javaClass, name)
+    }
+
+    fun multiArray(desc: String, sizes: List<Int>): JArr {
+        fun build(dim: Int): JArr {
+            val n = sizes.getOrNull(dim)?.coerceAtLeast(0) ?: 0
+            return JArr(MutableList<Any?>(n) {
+                if (dim + 1 < sizes.size) build(dim + 1) else null
+            })
+        }
+        return build(0)
+    }
+
     private fun execMethod(
         m: JMethod,
         self: JObj?,
@@ -178,6 +394,7 @@ internal class Interp {
         args: List<Any?>
     ): Any? {
         m.native?.let { return it(this, self, args) }
+        m.code?.let { return Jvm.run(this, m, self, args) }
         val body = m.body ?: return null
         val f = Frame(self, owner)
         for (i in m.params.indices) {
@@ -546,6 +763,9 @@ internal class JArr(val items: MutableList<Any?>) {
 }
 
 internal object V {
+
+    /** 把解释出来的壳对象换成它包着的宿主对象；其它原样返回 */
+    fun unwrap(v: Any?): Any? = if (v is JObj) (v.native ?: v) else v
 
     fun str(v: Any?): String = when (v) {
         null -> "null"
@@ -966,6 +1186,16 @@ internal object Native {
             out[i] = convert(args[i], t)
         }
         return out
+    }
+
+    fun setStatic(clsName: String, name: String, v: Any?) {
+        val cls = resolve(clsName) ?: throw MtRuntimeException("找不到类 $clsName")
+        val f = runCatching { cls.getField(name) }.getOrNull()
+            ?: throw MtRuntimeException("$clsName 没有静态字段 $name")
+        runCatching {
+            f.isAccessible = true
+            f.set(null, convert(v, f.type))
+        }.onFailure { throw MtRuntimeException("写 $clsName.$name 失败：${it.message}") }
     }
 
     fun staticField(clsName: String, name: String): Any? {

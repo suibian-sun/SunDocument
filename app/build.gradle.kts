@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.5.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 21
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.6.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 22
 
 android {
     namespace = "com.suibian.sunfile"
@@ -107,6 +107,19 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     // 给改过的 APK 重签名（v1 + v2 + v3）
     implementation("com.android.tools.build:apksig:8.5.2")
+    // Smali 反汇编 / 汇编：dexlib2 + baksmali + smali（纯 Java，运行期只用 antlr runtime）
+    implementation("org.smali:dexlib2:2.5.2") {
+        exclude(group = "com.google.code.findbugs", module = "jsr305")
+    }
+    implementation("org.smali:baksmali:2.5.2") {
+        exclude(group = "com.google.code.findbugs", module = "jsr305")
+    }
+    implementation("org.smali:smali:2.5.2") {
+        exclude(group = "org.antlr", module = "antlr")
+        exclude(group = "com.google.code.findbugs", module = "jsr305")
+        exclude(group = "com.beust", module = "jcommander")
+    }
+    implementation("org.antlr:antlr-runtime:3.5.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

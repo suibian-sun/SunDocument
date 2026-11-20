@@ -142,7 +142,7 @@ src/*.java         插件源码，可以带 package 与多级目录
 assets/*.mtl       语言包，String.mtl / String-zh-CN.mtl
 assets/            其它资源，context.getAssetsAsStream("d/a.txt") 读
 icon.png           可选，图标
-libs/*.jar         第三方库（见限制）
+libs/*.jar         第三方库：解成 class 直接进解释器（见下）
 ```
 
 已实现的 API：
@@ -157,6 +157,19 @@ libs/*.jar         第三方库（见限制）
 
 安装：设置 → MT 插件 → 右上角加号选 `.mtp`；空列表里还能一键装一个示例插件。
 装上后详情页能看设置界面、跑一次翻译、看插件日志。
+
+### 依赖 jar 的插件
+
+有些插件把算法放进 `libs/*.jar`。Android 上没有 `d8`，`DexClassLoader` 也加载不了 JVM 字节码，
+所以这里写了一个**字节码解释器**：解析 `.class` 的常量池、方法与 `Code` 属性，按指令直接执行，
+和源码类共用一套对象模型（实例是同一个 `JObj`，静态字段挂在同一个 `JClass`）。
+
+覆盖常规 javac 会生成的指令：常量、局部变量、栈操作、算术与类型转换、比较与跳转、
+`tableswitch` / `lookupswitch`、字段读写、四种方法调用、`new` / 数组 / `athrow` / `checkcast`、
+异常表（try/catch）。宿主类（String、StringBuilder、List、Map、File、Android API）走反射桥。
+
+`jsr` / `ret` / `invokedynamic` 会明确报错（lambda 会编译成 `invokedynamic`，改用匿名类即可）。
+单个方法执行超过 2000 万条指令会判定为死循环并中断，不会卡住界面。
 
 原来的「脚本动作」插件（`manifest.json` 里写 `actions`，用 shell 或 dex 类实现）
 仍然支持，入口在设置 → 插件。
@@ -173,6 +186,19 @@ libs/*.jar         第三方库（见限制）
 **点九图**：`npTc` 块保存拉伸区，四边各 1 像素保存拉伸与留白标记。
 编辑器把 1 像素的边放大成 20dp 宽的格子，点格子切换黑点，
 右下留白与整条拉伸有快捷按钮，保存时重新编码 PNG 并在 IHDR 后写回 `npTc`。
+
+## Smali 编辑
+
+APK → 打开方式 → **Smali 编辑**。这一步用 dexlib2 / baksmali 把 `classesN.dex` 摊成
+`包路径/类名.smali`，点开任意类就是完整的代码编辑器（语法高亮、查找替换、撤销、跳行都在）。
+
+反汇编结果缓存在 `cache/smali/<包名-大小-时间>/`，第二次打开直接命中；改动过的文件按 `.ok`
+标记的修改时间判断，列表右侧会亮一个小点。
+
+顶栏 **编译** 会把改动过的 dex 目录重新汇编（smali 汇编器）、替换进包里的同名条目（其余条目原样复制），
+再自动重签成 `<名字>-smali-signed.apk`，可以直接安装。编译失败会给出 smali 报的文件与行号。
+
+改了 dex 的包签名必然失效，所以产物是另存的新文件，不动原件。
 
 ## 清单编辑与重签名
 
@@ -284,7 +310,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.5.0 -PappVersionCode=21
+./gradlew assembleRelease -PappVersionName=1.6.0 -PappVersionCode=22
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -295,7 +321,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.5.0 && git push origin v1.5.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.6.0 && git push origin v1.6.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -316,12 +342,13 @@ export ANDROID_HOME=/path/to/android-sdk
 - 超过 12 万字的文本自动关闭整篇着色与补全（整段重排已经很重，优先保证输入流畅）；打开超过 32 MB 的文件会提示改用十六进制编辑器。
 - 分段载入的超长文件暂不支持撤销 / 重做，避免与未载入的尾部错位。
 - 十六进制编辑器单次最多载入 6 MB；更大的文件只读浏览，保存按钮会隐藏，避免只写回前半段。
-- **逆向做到「看 + 改资源 + 改清单 + 重签」**：AndroidManifest 反编译、dex 浏览、签名与组件信息、
-  资源表读写、AXML 回编译、v1+v2+v3 重签名。**Smali 编辑仍然没有**——反汇编与回汇编需要完整的
-  baksmali / smali 工具链，不是这一版能塞进来的东西，dex 侧目前只到类 / 方法 / 字段 / 字符串浏览。
-- **MT 插件走解释执行**：插件源码由内置解释器跑，JDK 与 Android 常用类通过反射调用。
-  依赖 `libs/*.jar` 的插件跑不了（Android 上没法执行 jar 里的 JVM 字节码），
-  用到解释器没覆盖的语法或类时会明确报错，不会静默失败。
+- **逆向做到「看 + 改」全流程**：AndroidManifest 反编译与回编译、dex 浏览、签名与组件信息、
+  资源表读写、**Smali 反汇编与回汇编**、v1+v2+v3 重签名。改过的包签名必然失效，安装前需要重签
+  （页面里的「重签名」或 Smali 编辑的「编译」都会自动做）。
+- **MT 插件与 jar 走解释执行**：插件源码由内置解释器跑，`libs/*.jar` 由字节码解释器跑，
+  JDK 与 Android 常用类通过反射调用。反射回调（宿主把接口回调进插件对象，例如 `Collections.sort`
+  的 Comparator）不支持；lambda（`invokedynamic`）不支持。遇到没覆盖的语法、指令或类时会明确报错，
+  不会静默失败。
 - 最低支持 Android 8.0（API 26）：7z / xz 解码依赖 `java.nio.file`，低版本无法保证稳定。
 - 编辑器暂不支持多文件标签页（MT 的「保留文件」），关闭时会提示保存；终端直接调用系统 `sh`，没有内置 bash / coreutils 扩展包，`ls -l` 等行为以系统自带实现为准。
 
@@ -329,6 +356,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.6.0 | Smali 编辑（反汇编 classesN.dex、改完汇编回写、自动重签）；插件 `libs/*.jar` 支持（class 解析 + JVM 字节码解释器） |
 | 1.5.0 | MT 插件直装直用（Java 源码解释器 + `bin.mt.plugin.api` 宿主实现，翻译引擎 / 设置界面 / 本地化文本）；清单编辑（AXML 回编译并写回 APK）；APK 重签名（v1+v2+v3，运行时自签证书） |
 | 1.4.0 | 资源表编辑器（读类型/条目/限定符，改字符串与整数并写回 APK）；点九图编辑器（补丁线可视化、保存回 .9.png）；MCP 服务（本机 JSON-RPC，9 个文件工具）；界面分析（无障碍控件树，可导出）；设置新增「开发者」分组 |
 | 1.3.0 | Office 按内容识别（含老式 ppt/doc/xls）；PPT 分页排版；PDF 内置阅读器；压缩包返回先回上级；.mtp 插件体系；免 Root 浏览 Android/data 与 obb；系统信息页；HEX 对比可改字节；打开方式分页；音频封面；设置页精简 |

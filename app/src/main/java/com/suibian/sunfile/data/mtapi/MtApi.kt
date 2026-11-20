@@ -408,16 +408,16 @@ object MtApi {
 
         val base = JClass("BaseTranslationEngine")
         base.ctors.add(
-            JMethod("<init>", emptyList(), null, false) { _, self, _ ->
+            JMethod("<init>", emptyList(), null, false, native = { _, self, _ ->
                 self?.native = BaseEngineHost(null)
                 null
-            }
+            })
         )
         base.ctors.add(
-            JMethod("<init>", listOf(Param("Configuration", "configuration")), null, false) { _, self, args ->
+            JMethod("<init>", listOf(Param("Configuration", "configuration")), null, false, native = { _, self, args ->
                 self?.native = BaseEngineHost(args.getOrNull(0))
                 null
-            }
+            })
         )
         interp.classes["BaseTranslationEngine"] = base
         interp.relink()

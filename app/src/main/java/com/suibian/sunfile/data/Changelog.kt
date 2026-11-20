@@ -17,6 +17,17 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.6.0",
+            date = "2026-11-20",
+            title = "Smali 编辑与 jar 插件",
+            items = listOf(
+                "Smali 编辑：把 APK 里的 classesN.dex 摊成类文件，点开就能改，编译回 dex 后自动替换并重签",
+                "反汇编结果带缓存，第二次打开秒开；改过的类在列表右侧亮一个点",
+                "插件 libs 目录下的 jar 现在能用了：解析 class 文件的常量池与字节码，直接解释执行",
+                "字节码解释器覆盖常规指令与 try/catch，宿主类走反射桥；死循环会中断，不会卡住界面"
+            )
+        ),
+        ChangeEntry(
             version = "1.5.0",
             date = "2026-11-20",
             title = "MT 插件直装直用",
