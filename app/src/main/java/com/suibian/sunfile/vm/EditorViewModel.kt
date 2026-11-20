@@ -8,6 +8,7 @@ import com.suibian.sunfile.data.HistoryStore
 import com.suibian.sunfile.data.Revision
 import com.suibian.sunfile.ui.editor.Lang
 import com.suibian.sunfile.ui.editor.Syntax
+import com.suibian.sunfile.ui.editor.SyntaxPlugins
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,8 @@ data class EditorState(
     val readOnly: Boolean = false,
     val totalBytes: Long = 0,
     val lang: Lang = Lang.PLAIN,
+    /** 命中用户语法插件时，这里存插件 id，高亮改走插件规则 */
+    val plugin: String? = null,
     /** 外部替换文本（打开、撤销、恢复历史）时自增，让输入框重新同步 */
     val syncToken: Int = 0,
     val canUndo: Boolean = false,
@@ -73,6 +76,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val maxUndoChars = 8L * 1024 * 1024
 
     fun open(file: File, encoding: String? = null) {
+        SyntaxPlugins.ensureLoaded(getApplication())
         // 超大文件直接拒绝：整篇读入会 OOM，提示改用十六进制编辑器分段查看
         if (runCatching { file.length() }.getOrDefault(0L) > 32L * 1024 * 1024) {
             _state.value = EditorState(
@@ -90,7 +94,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             file = file,
             loading = true,
             encoding = encoding ?: "UTF-8",
-            lang = Syntax.langFor(file.name)
+            lang = Syntax.langFor(file.name),
+            plugin = SyntaxPlugins.specFor(file.name)?.id
         )
         viewModelScope.launch {
             val content = withContext(Dispatchers.IO) {
@@ -107,6 +112,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     totalBytes = c.totalBytes,
                     encoding = c.encoding,
                     lang = Syntax.langFor(file.name),
+                    plugin = SyntaxPlugins.specFor(file.name)?.id,
                     syncToken = ++openToken,
                     loadedBytes = c.loadedBytes,
                     partial = c.partial,
@@ -327,6 +333,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     baseline = content,
                     saving = false,
                     lang = Syntax.langFor(target.name),
+                    plugin = SyntaxPlugins.specFor(target.name)?.id,
                     readOnly = false
                 )
                 _toast.tryEmit("已另存为 ${target.name}")

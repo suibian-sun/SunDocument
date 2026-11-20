@@ -666,7 +666,8 @@ object FileRepo {
         Archives.Kind.ZIP -> ArchiveKind.ZIP
         Archives.Kind.RAR -> ArchiveKind.RAR
         Archives.Kind.SEVEN_Z -> ArchiveKind.SEVEN_Z
-        Archives.Kind.TAR, Archives.Kind.TAR_GZ, Archives.Kind.TAR_BZ2, Archives.Kind.TAR_XZ -> ArchiveKind.TAR
+        Archives.Kind.TAR, Archives.Kind.TAR_GZ, Archives.Kind.TAR_BZ2, Archives.Kind.TAR_XZ,
+        Archives.Kind.TAR_SPLIT -> ArchiveKind.TAR
         Archives.Kind.GZIP -> ArchiveKind.GZIP
         Archives.Kind.BZIP2 -> ArchiveKind.BZIP2
         Archives.Kind.XZ -> ArchiveKind.XZ
@@ -1019,15 +1020,49 @@ object FileRepo {
 
     // ---------------- 搜索 ----------------
 
+    /** 文件名匹配方式，对应搜索面板最上面那个下拉 */
+    enum class MatchMode(val label: String) {
+        GLOB("文件名通配表达式（*和?）"),
+        CONTAINS("文件名包含"),
+        REGEX("文件名正则表达式")
+    }
+
+    /** 搜索条件：与 MT 搜索面板逐项对应 */
+    data class SearchOptions(
+        val match: MatchMode = MatchMode.GLOB,
+        val caseSensitive: Boolean = false,
+        val recursive: Boolean = true,
+        val minSize: Long = 0L,
+        val maxSize: Long = Long.MAX_VALUE,
+        /** 只要这个时间点之后修改过的文件，0 表示不限 */
+        val since: Long = 0L,
+        /** 文件内容必须包含的文字，空表示不限 */
+        val contains: String = ""
+    ) {
+        val hasSizeFilter: Boolean get() = minSize > 0L || maxSize != Long.MAX_VALUE
+        val hasTimeFilter: Boolean get() = since > 0L
+    }
+
     fun search(
         root: File,
         query: String,
         maxResults: Int = 300,
         onProgress: (scanned: Int, current: String) -> Unit,
         cancelled: () -> Boolean
+    ): List<FileEntry> = search(root, query, SearchOptions(), maxResults, onProgress, cancelled)
+
+    fun search(
+        root: File,
+        query: String,
+        options: SearchOptions,
+        maxResults: Int = 300,
+        onProgress: (scanned: Int, current: String) -> Unit,
+        cancelled: () -> Boolean
     ): List<FileEntry> {
-        val keyword = query.trim().lowercase()
+        val keyword = query.trim()
         if (keyword.isEmpty()) return emptyList()
+        val accept = matcherOf(keyword, options)
+        val contains = options.contains.trim()
         val results = ArrayList<FileEntry>()
         val queue = ArrayDeque<File>()
         queue.addLast(root)
@@ -1040,23 +1075,32 @@ object FileRepo {
             for (c in children) {
                 scanned++
                 val name = c.name
-                if (name.lowercase().contains(keyword)) {
-                    val isDir = runCatching { c.isDirectory }.getOrDefault(false)
-                    results.add(
-                        FileEntry(
-                            file = c,
-                            name = name,
-                            isDir = isDir,
-                            size = if (isDir) 0L else runCatching { c.length() }.getOrDefault(0L),
-                            lastModified = runCatching { c.lastModified() }.getOrDefault(0L),
-                            isHidden = name.startsWith("."),
-                            canRead = runCatching { c.canRead() }.getOrDefault(false),
-                            canWrite = runCatching { c.canWrite() }.getOrDefault(false)
-                        )
-                    )
-                    if (results.size >= maxResults) break
+                val isDir = runCatching { c.isDirectory }.getOrDefault(false)
+                if (!accept(name)) {
+                    if (isDir && options.recursive) queue.addLast(c)
+                    continue
                 }
-                if (runCatching { c.isDirectory }.getOrDefault(false)) queue.addLast(c)
+                val size = if (isDir) 0L else runCatching { c.length() }.getOrDefault(0L)
+                val modified = runCatching { c.lastModified() }.getOrDefault(0L)
+                if (!isDir) {
+                    if (size < options.minSize || size > options.maxSize) continue
+                    if (options.since > 0L && modified < options.since) continue
+                    if (contains.isNotEmpty() && !fileContains(c, contains, options.caseSensitive)) continue
+                }
+                results.add(
+                    FileEntry(
+                        file = c,
+                        name = name,
+                        isDir = isDir,
+                        size = size,
+                        lastModified = modified,
+                        isHidden = name.startsWith("."),
+                        canRead = runCatching { c.canRead() }.getOrDefault(false),
+                        canWrite = runCatching { c.canWrite() }.getOrDefault(false)
+                    )
+                )
+                if (results.size >= maxResults) break
+                if (isDir && options.recursive) queue.addLast(c)
             }
             val now = System.currentTimeMillis()
             if (now - tick > 120) {
@@ -1066,6 +1110,44 @@ object FileRepo {
         }
         onProgress(scanned, "")
         return results
+    }
+
+    private fun fileContains(file: File, text: String, caseSensitive: Boolean): Boolean {
+        if (file.length() > 4L * 1024 * 1024) return false
+        if (!looksLikeText(file)) return false
+        return runCatching {
+            file.useLines { lines ->
+                lines.any { it.contains(text, ignoreCase = !caseSensitive) }
+            }
+        }.getOrDefault(false)
+    }
+
+    /** 把通配符表达式转成正则：* 任意串、? 单个字符，其余字符按字面量 */
+    fun matcherOf(query: String, options: SearchOptions): (String) -> Boolean {
+        val flags = if (options.caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+        return when (options.match) {
+            MatchMode.CONTAINS -> { name -> name.contains(query, ignoreCase = !options.caseSensitive) }
+            MatchMode.REGEX -> {
+                val rx = runCatching { Regex(query, flags) }.getOrNull() ?: return { false }
+                { name -> rx.containsMatchIn(name) }
+            }
+            MatchMode.GLOB -> {
+                val hasWildcard = query.any { it == '*' || it == '?' }
+                val body = buildString {
+                    if (!hasWildcard) append(".*")
+                    query.forEach { ch ->
+                        when (ch) {
+                            '*' -> append(".*")
+                            '?' -> append('.')
+                            else -> append(Regex.escape(ch.toString()))
+                        }
+                    }
+                    if (!hasWildcard) append(".*")
+                }
+                val rx = runCatching { Regex(body, flags) }.getOrNull() ?: return { false }
+                { name -> rx.matches(name) }
+            }
+        }
     }
 
     /** 正文命中：文件 + 行号 + 该行片段 */

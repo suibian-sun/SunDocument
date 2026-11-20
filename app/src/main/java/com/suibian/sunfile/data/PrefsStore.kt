@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 data class AppPrefs(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val showHidden: Boolean = false,
+    /** html / md 的打开方式：ASK 每次询问 / PREVIEW 直接预览 / EDIT 直接编辑 */
+    val htmlMode: String = "ASK",
     val sort: SortSpec = SortSpec(),
     val useAccelerator: Boolean = true,
     val autoCheckUpdate: Boolean = true,
@@ -19,7 +21,9 @@ data class AppPrefs(
     val editorCompletion: Boolean = true,
     val bookmarks: List<String> = emptyList(),
     /** 最近访问过的目录，最新在前 */
-    val recent: List<String> = emptyList()
+    val recent: List<String> = emptyList(),
+    /** 最近搜索过的关键词，最新在前 */
+    val recentSearches: List<String> = emptyList()
 )
 
 /**
@@ -47,6 +51,7 @@ class PrefsStore private constructor(context: Context) {
         themeMode = runCatching { ThemeMode.valueOf(sp.getString("theme_mode", "SYSTEM")!!) }
             .getOrDefault(ThemeMode.SYSTEM),
         showHidden = sp.getBoolean("show_hidden", false),
+        htmlMode = sp.getString("html_mode", "ASK") ?: "ASK",
         sort = SortSpec(
             mode = runCatching { SortMode.valueOf(sp.getString("sort_mode", "NAME")!!) }
                 .getOrDefault(SortMode.NAME),
@@ -60,7 +65,9 @@ class PrefsStore private constructor(context: Context) {
         editorLineNumbers = sp.getBoolean("editor_line_numbers", true),
         editorCompletion = sp.getBoolean("editor_completion", true),
         bookmarks = (sp.getString("bookmarks", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct(),
-        recent = (sp.getString("recent", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct().take(20)
+        recent = (sp.getString("recent", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct().take(20),
+        recentSearches = (sp.getString("recent_search", "") ?: "")
+            .split('\n').filter { it.isNotBlank() }.distinct().take(15)
     )
 
     private fun decodeOpenWith(raw: String): Map<String, OpenMode> {
@@ -129,9 +136,28 @@ class PrefsStore private constructor(context: Context) {
         sp.edit().putString("recent", trimmed.joinToString("\n")).apply()
     }
 
+    fun pushSearch(keyword: String) {
+        if (keyword.isBlank()) return
+        val list = (_prefs.value.recentSearches.filterNot { it == keyword }).toMutableList()
+        list.add(0, keyword)
+        val trimmed = list.take(15)
+        _prefs.value = _prefs.value.copy(recentSearches = trimmed)
+        sp.edit().putString("recent_search", trimmed.joinToString("\n")).apply()
+    }
+
+    fun clearSearches() {
+        _prefs.value = _prefs.value.copy(recentSearches = emptyList())
+        sp.edit().putString("recent_search", "").apply()
+    }
+
     fun clearRecent() {
         _prefs.value = _prefs.value.copy(recent = emptyList())
         sp.edit().putString("recent", "").apply()
+    }
+
+    fun setHtmlMode(mode: String) {
+        _prefs.value = _prefs.value.copy(htmlMode = mode)
+        sp.edit().putString("html_mode", mode).apply()
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -145,6 +171,7 @@ class PrefsStore private constructor(context: Context) {
         sp.edit()
             .putString("theme_mode", next.themeMode.name)
             .putBoolean("show_hidden", next.showHidden)
+            .putString("html_mode", next.htmlMode)
             .putString("sort_mode", next.sort.mode.name)
             .putBoolean("sort_asc", next.sort.ascending)
             .putBoolean("use_accelerator", next.useAccelerator)
@@ -156,6 +183,7 @@ class PrefsStore private constructor(context: Context) {
             .putString("open_with", encodeOpenWith(next.openWith))
             .putString("bookmarks", next.bookmarks.joinToString("\n"))
             .putString("recent", next.recent.joinToString("\n"))
+            .putString("recent_search", next.recentSearches.joinToString("\n"))
             .apply()
     }
 }

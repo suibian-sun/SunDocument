@@ -118,6 +118,7 @@ fun TerminalPage(onBack: () -> Unit) {
             text == "help" -> {
                 lines.add("cd <目录>        切换工作目录（支持 Root 目录）")
                 lines.add("ls / cat / cp / mv / rm / chmod / stat 等系统命令直接可用")
+                lines.add("ll / la          等价于 ls -al / ls -a")
                 lines.add("su               在终端内申请 Root")
                 lines.add("clear            清屏")
                 lines.add("")
@@ -145,6 +146,31 @@ fun TerminalPage(onBack: () -> Unit) {
                 }
                 return
             }
+            text == "ll" -> {
+                running = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        Shell.runScript("cd ${Shell.q(cwd)} 2>/dev/null; ls -al", root, 25_000)
+                    }
+                    result.out.trimEnd().lineSequence().take(400).forEach { lines.add(it) }
+                    if (result.err.isNotBlank()) result.err.trim().lineSequence().take(40).forEach { lines.add(it) }
+                    lines.add("")
+                    running = false
+                }
+                return
+            }
+            text == "la" -> {
+                running = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        Shell.runScript("cd ${Shell.q(cwd)} 2>/dev/null; ls -a", root, 25_000)
+                    }
+                    result.out.trimEnd().lineSequence().take(400).forEach { lines.add(it) }
+                    lines.add("")
+                    running = false
+                }
+                return
+            }
             text == "pwd" -> {
                 lines.add(cwd)
                 lines.add("")
@@ -167,6 +193,10 @@ fun TerminalPage(onBack: () -> Unit) {
             val err = result.err.trim()
             if (err.isNotEmpty()) err.lineSequence().take(60).forEach { lines.add(it) }
             if (out.isEmpty() && err.isEmpty()) lines.add("（无输出）")
+            // 被权限挡住时说清楚下一步，而不是只丢一句 Permission denied
+            if (!root && (out + err).contains("Permission denied", ignoreCase = true)) {
+                lines.add("提示：该目录需要 Root，输入 su 申请后再试")
+            }
             lines.add("")
             while (lines.size > 2000) lines.removeAt(0)
             running = false

@@ -6,7 +6,10 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.graphics.Color
 import com.suibian.sunfile.ui.theme.SunPalette
 
@@ -576,4 +579,123 @@ object Syntax {
         }
         return new
     }
+
+    // ---------------- 插件语法 ----------------
+
+    /** 用用户插件里的规则着色：块注释 → 行注释 → 字符串 → 数字 → 关键字 */
+    fun highlightPlugin(text: String, plugin: SyntaxPlugin, colors: CodeColors): AnnotatedString {
+        val b = AnnotatedString.Builder(text)
+        val busy = BooleanArray(text.length)
+        fun mark(from: Int, to: Int) {
+            for (i in from.coerceAtLeast(0) until to.coerceAtMost(text.length)) busy[i] = true
+        }
+
+        val bs = plugin.blockStart
+        val be = plugin.blockEnd
+        if (bs != null && be != null) {
+            var at = text.indexOf(bs)
+            while (at >= 0) {
+                val close = text.indexOf(be, at + bs.length)
+                val stop = if (close < 0) text.length else close + be.length
+                b.addStyle(SpanStyle(color = colors.comment, fontStyle = FontStyle.Italic), at, stop)
+                mark(at, stop)
+                at = if (close < 0) -1 else text.indexOf(bs, stop)
+            }
+        }
+
+        plugin.lineComment?.let { lc ->
+            var lineStart = 0
+            while (lineStart <= text.length) {
+                val nl = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+                val c = text.indexOf(lc, lineStart)
+                if (c in lineStart until nl) {
+                    b.addStyle(SpanStyle(color = colors.comment, fontStyle = FontStyle.Italic), c, nl)
+                    mark(c, nl)
+                }
+                lineStart = nl + 1
+            }
+        }
+
+        var i = 0
+        while (i < text.length) {
+            val ch = text[i]
+            if (ch == '"' || ch == '\'' || ch == '`') {
+                var j = i + 1
+                while (j < text.length) {
+                    if (text[j] == '\\' && j + 1 < text.length) { j += 2; continue }
+                    if (text[j] == ch) { j++; break }
+                    if (text[j] == '\n' && ch != '`') break
+                    j++
+                }
+                val stop = j.coerceAtMost(text.length)
+                b.addStyle(SpanStyle(color = colors.string), i, stop)
+                mark(i, stop)
+                i = stop
+                continue
+            }
+            i++
+        }
+
+        Regex("""\b\d+(\.\d+)?\b""").findAll(text).forEach { m ->
+            if (!busy.getOrElse(m.range.first) { false }) {
+                b.addStyle(SpanStyle(color = colors.number), m.range.first, m.range.last + 1)
+            }
+        }
+
+        if (plugin.keywords.isNotEmpty()) {
+            val word = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+            val set = if (plugin.caseInsensitive) plugin.keywords.map { it.lowercase() }.toSet() else plugin.keywords
+            word.findAll(text).forEach { m ->
+                val w = if (plugin.caseInsensitive) m.value.lowercase() else m.value
+                if (w in set && !busy.getOrElse(m.range.first) { false }) {
+                    b.addStyle(
+                        SpanStyle(color = colors.keyword, fontWeight = FontWeight.Medium),
+                        m.range.first,
+                        m.range.last + 1
+                    )
+                }
+            }
+        }
+        return b.toAnnotatedString()
+    }
+
+    fun pluginTransformation(plugin: SyntaxPlugin, colors: CodeColors): VisualTransformation =
+        object : VisualTransformation {
+            override fun filter(text: AnnotatedString): TransformedText =
+                TransformedText(highlightPlugin(text.text, plugin, colors), OffsetMapping.Identity)
+        }
+
+
+    /** JSON 格式化：解析后按 2 空格重排，解析失败返回 null */
+    fun formatJson(text: String): String? = runCatching {
+        val value = org.json.JSONTokener(text).nextValue()
+        when (value) {
+            is org.json.JSONObject -> value.toString(2)
+            is org.json.JSONArray -> value.toString(2)
+            else -> null
+        }
+    }.getOrNull()
+
+    /** 粗略的 XML 缩进：只处理标签边界，不碰属性内容 */
+    fun formatXml(text: String): String? = runCatching {
+        val compact = text.replace(Regex(">\\s*<"), "><").trim()
+        val sb = StringBuilder()
+        var depth = 0
+        var i = 0
+        val tokens = Regex("<[^>]+>|[^<]+").findAll(compact).map { it.value }.toList()
+        tokens.forEach { token ->
+            val t = token.trim()
+            if (t.isEmpty()) return@forEach
+            when {
+                t.startsWith("</") -> { depth = (depth - 1).coerceAtLeast(0); sb.append("  ".repeat(depth)).append(t).append('\n') }
+                t.startsWith("<?") || t.startsWith("<!") -> sb.append(t).append('\n')
+                t.startsWith("<") && t.endsWith("/>") -> sb.append("  ".repeat(depth)).append(t).append('\n')
+                t.startsWith("<") -> { sb.append("  ".repeat(depth)).append(t).append('\n'); depth++ }
+                else -> sb.append("  ".repeat(depth)).append(t).append('\n')
+            }
+            i++
+        }
+        if (i == 0) null else sb.toString().trimEnd()
+    }.getOrNull()
+
 }

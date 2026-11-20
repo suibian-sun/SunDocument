@@ -73,7 +73,9 @@ fun SettingsPage(
     onAbout: () -> Unit,
     dataDir: String = "",
     onOpenWithManager: () -> Unit = {},
-    onChangelog: () -> Unit = {}
+    onChangelog: () -> Unit = {},
+    onTrash: () -> Unit = {},
+    onHtmlMode: (String) -> Unit = {}
 ) {
     Column(
         Modifier
@@ -110,6 +112,24 @@ fun SettingsPage(
             SwitchRow("下载加速", "优先使用公共镜像线路，失败自动回退", prefs.useAccelerator, onToggleAccelerator)
             ValueRow("立即检查更新", "当前 v${BuildConfig.VERSION_NAME}", onCheckUpdate)
             ValueRow("历史更新", "查看每个版本改了什么", onChangelog)
+            ValueRow("回收站", "已删除的文件保留 30 天", onTrash)
+
+            ValueRow(
+                "网页与 Markdown",
+                when (prefs.htmlMode) {
+                    "PREVIEW" -> "点击直接预览"
+                    "EDIT" -> "点击直接编辑"
+                    else -> "每次询问"
+                }
+            ) {
+                onHtmlMode(
+                    when (prefs.htmlMode) {
+                        "ASK" -> "PREVIEW"
+                        "PREVIEW" -> "EDIT"
+                        else -> "ASK"
+                    }
+                )
+            }
 
             SectionTitle("编辑器")
             ValueRow(

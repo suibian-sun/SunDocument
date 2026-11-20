@@ -65,6 +65,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Description
@@ -89,6 +90,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -343,6 +345,7 @@ fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
         mutableIntStateOf(list.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0))
     }
     var direction by remember { mutableIntStateOf(0) }
+    var exifFor by remember { mutableStateOf<File?>(null) }
     val current = list.getOrElse(index) { file }
 
     fun go(delta: Int) {
@@ -358,6 +361,14 @@ fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
         onClose = onClose,
         background = Color(0xFF050608),
         actions = {
+            IconButton(onClick = { exifFor = current }, modifier = Modifier.size(42.dp)) {
+                Icon(
+                    Icons.Outlined.Info,
+                    "详情",
+                    tint = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
             ShareButton(current)
         }
     ) {
@@ -406,6 +417,74 @@ fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
             }
         }
     }
+
+    exifFor?.let { target -> ImageInfoDialog(target) { exifFor = null } }
+}
+
+/** 图片详情：分辨率、体积与 EXIF（拍摄时间、器材、曝光、位置） */
+@Composable
+private fun ImageInfoDialog(file: File, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val rows by produceState(initialValue = emptyList<Pair<String, String>>(), file) {
+        value = withContext(Dispatchers.IO) { readImageInfo(context, file) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = {
+            Text(
+                file.name,
+                color = SunColors.TextPrimary,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                rows.forEach { (k, v) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text(k, color = SunColors.TextTertiary, fontSize = 11.5.sp, modifier = Modifier.width(84.dp))
+                        Text(v, color = SunColors.TextPrimary, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭", color = SunColors.Accent, fontSize = 13.sp) }
+        }
+    )
+}
+
+private fun readImageInfo(context: android.content.Context, file: File): List<Pair<String, String>> {
+    val out = ArrayList<Pair<String, String>>()
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds) }
+    if (bounds.outWidth > 0) out.add("尺寸" to "${bounds.outWidth} × ${bounds.outHeight}")
+    out.add("大小" to Fmt.size(file.length()))
+    out.add("格式" to file.extension.uppercase().ifEmpty { "未知" })
+    runCatching {
+        val exif = androidx.exifinterface.media.ExifInterface(file.absolutePath)
+        fun text(tag: String, label: String) {
+            exif.getAttribute(tag)?.takeIf { it.isNotBlank() }?.let { out.add(label to it) }
+        }
+        text(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL, "拍摄时间")
+        text(androidx.exifinterface.media.ExifInterface.TAG_MAKE, "品牌")
+        text(androidx.exifinterface.media.ExifInterface.TAG_MODEL, "机型")
+        text(androidx.exifinterface.media.ExifInterface.TAG_LENS_MODEL, "镜头")
+        text(androidx.exifinterface.media.ExifInterface.TAG_F_NUMBER, "光圈")
+        text(androidx.exifinterface.media.ExifInterface.TAG_EXPOSURE_TIME, "快门")
+        text(androidx.exifinterface.media.ExifInterface.TAG_ISO_SPEED_RATINGS, "ISO")
+        text(androidx.exifinterface.media.ExifInterface.TAG_FOCAL_LENGTH, "焦距")
+        text(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_DESCRIPTION, "描述")
+        val latLong = FloatArray(2)
+        if (exif.getLatLong(latLong)) {
+            out.add("位置" to String.format(java.util.Locale.US, "%.5f, %.5f", latLong[0], latLong[1]))
+        }
+    }
+    if (out.size <= 3) out.add("EXIF" to "这张图片没有记录拍摄信息")
+    return out
 }
 
 @Composable
@@ -813,9 +892,10 @@ fun ArchiveOverlay(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (node.isDir) {
-                                com.suibian.sunfile.ui.components.MtFolderIcon(
-                                    Modifier.size(21.dp),
-                                    SunColors.Folder
+                                com.suibian.sunfile.ui.components.MaterialFileIcon(
+                                    name = node.name,
+                                    isDir = true,
+                                    size = 21.dp
                                 )
                             } else {
                                 FileTypeBadge(File(node.full), isDir = false, size = 22.dp)
@@ -989,6 +1069,7 @@ fun VideoViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
         mutableIntStateOf(list.indexOfFirst { it.absolutePath == file.absolutePath }.coerceAtLeast(0))
     }
     var direction by remember { mutableIntStateOf(0) }
+    var exifFor by remember { mutableStateOf<File?>(null) }
     val current = list.getOrElse(index) { file }
 
     fun go(delta: Int) {

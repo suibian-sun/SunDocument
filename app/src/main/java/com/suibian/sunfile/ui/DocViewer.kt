@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -77,12 +78,26 @@ fun DocumentViewerOverlay(file: File, onClose: () -> Unit, onOpenExternal: (File
     var content by remember(file) { mutableStateOf<DocContent?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     var sheetIndex by remember(file) { mutableIntStateOf(0) }
+    var editMode by remember(file) { mutableStateOf(false) }
+    var reload by remember(file) { mutableIntStateOf(0) }
 
     BackHandler { onClose() }
 
-    LaunchedEffect(file) {
+    LaunchedEffect(file, reload) {
         val result = withContext(Dispatchers.IO) { runCatching { DocParser.parse(file) } }
         result.onSuccess { content = it }.onFailure { error = it.message ?: "无法读取这个文档" }
+    }
+
+    if (editMode) {
+        DocEditPane(
+            file = file,
+            onClose = { editMode = false },
+            onSaved = {
+                editMode = false
+                reload++
+            }
+        )
+        return
     }
 
     Column(
@@ -120,6 +135,16 @@ fun DocumentViewerOverlay(file: File, onClose: () -> Unit, onOpenExternal: (File
                     color = SunColors.TextTertiary,
                     fontSize = 10.sp
                 )
+            }
+            if (FileKinds.extensionOf(file) in setOf("docx", "docm", "pptx", "pptm", "xlsx", "xlsm", "csv", "tsv", "ods")) {
+                IconButton(onClick = { editMode = true }, modifier = Modifier.size(46.dp)) {
+                    Icon(
+                        Icons.Default.Edit,
+                        "编辑",
+                        tint = SunColors.TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
             IconButton(onClick = { onOpenExternal(file) }, modifier = Modifier.size(46.dp)) {
                 Icon(

@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.1.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 17
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.2.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 18
 
 android {
     namespace = "com.suibian.sunfile"
@@ -93,12 +93,16 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // 压缩包：7z / xz / bzip2 的读写（纯 Java，minSdk 26 起无兼容问题）
-    implementation("org.apache.commons:commons-compress:1.25.0")
-    implementation("org.tukaani:xz:1.9")
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.10")
     // ZIP 的 AES-256 / ZipCrypto 读写（密码保护）
     implementation("net.lingala.zip4j:zip4j:2.11.5")
     // RAR 只读
     implementation("com.github.junrar:junrar:7.5.5")
+    // material-icon-theme 的 SVG 图标渲染
+    implementation("com.caverock:androidsvg-aar:1.4")
+    // 图片详情里的 EXIF
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

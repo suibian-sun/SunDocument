@@ -13,6 +13,8 @@ import com.suibian.sunfile.data.RenameExpr
 import com.suibian.sunfile.data.Shell
 import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.data.StorageStats
+import com.suibian.sunfile.data.Trash
+import com.suibian.sunfile.data.TrashItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -78,7 +80,8 @@ data class SearchUiState(
     val results: List<SearchResult> = emptyList(),
     val contentHits: List<FileRepo.ContentHit> = emptyList(),
     val mode: SearchMode = SearchMode.NAME,
-    val finished: Boolean = false
+    val finished: Boolean = false,
+    val options: FileRepo.SearchOptions = FileRepo.SearchOptions()
 )
 
 class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
@@ -523,20 +526,21 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         deletePaths(activePaneState.selected.toList())
     }
 
-    fun deletePaths(paths: List<String>, onDone: () -> Unit = {}) {
+    fun deletePaths(paths: List<String>, trash: Boolean = true, onDone: () -> Unit = {}) {
         if (paths.isEmpty() || _busy.value != null) return
+        val ctx = getApplication<android.app.Application>()
         viewModelScope.launch {
-            _busy.value = OpState("正在删除…", "", 0, paths.size.toLong())
+            _busy.value = OpState(if (trash) "正在移到回收站…" else "正在删除…", "", 0, paths.size.toLong())
             val fail = withContext(Dispatchers.IO) {
                 var err: String? = null
                 for ((i, path) in paths.withIndex()) {
-                    try {
-                        FileRepo.delete(File(path))
-                    } catch (e: Exception) {
-                        err = e.message
+                    val r = if (trash) Trash.move(ctx, File(path))
+                    else runCatching { FileRepo.delete(File(path)) }.exceptionOrNull()?.message
+                    if (r != null) {
+                        err = r
                         break
                     }
-                    _busy.value = OpState("正在删除…", File(path).name, i + 1L, paths.size.toLong())
+                    _busy.value = _busy.value?.copy(currentFile = File(path).name, done = i + 1L)
                 }
                 err
             }
@@ -544,18 +548,52 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             mutate(_active.value) { it.copy(selected = emptySet()) }
             refreshAll()
             onDone()
-            _messages.tryEmit(fail ?: "已删除 ${paths.size} 项")
+            _messages.tryEmit(fail ?: if (trash) "已移到回收站（${paths.size} 项）" else "已删除 ${paths.size} 项")
         }
     }
 
-    fun deletePath(path: String, onDone: () -> Unit = {}) {
+    fun deletePath(path: String, trash: Boolean = true, onDone: () -> Unit = {}) {
+        val ctx = getApplication<android.app.Application>()
         viewModelScope.launch {
             val err = withContext(Dispatchers.IO) {
-                runCatching { FileRepo.delete(File(path)) }.exceptionOrNull()?.message
+                if (trash) Trash.move(ctx, File(path))
+                else runCatching { FileRepo.delete(File(path)) }.exceptionOrNull()?.message
             }
             refreshAll()
             onDone()
-            _messages.tryEmit(err ?: "已删除")
+            _messages.tryEmit(err ?: if (trash) "已移到回收站" else "已删除")
+        }
+    }
+
+    // ---------------- 回收站 ----------------
+
+    fun trashItems(): List<TrashItem> = Trash.list(getApplication())
+
+    fun restoreTrash(item: TrashItem, onDone: () -> Unit = {}) {
+        val ctx = getApplication<android.app.Application>()
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { Trash.restore(ctx, item) }
+            refreshAll()
+            onDone()
+            _messages.tryEmit(if (ok) "已还原到 ${item.origPath}" else "还原失败")
+        }
+    }
+
+    fun purgeTrash(item: TrashItem, onDone: () -> Unit = {}) {
+        val ctx = getApplication<android.app.Application>()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { Trash.purge(ctx, item) }
+            onDone()
+            _messages.tryEmit("已彻底删除")
+        }
+    }
+
+    fun emptyTrash(onDone: () -> Unit = {}) {
+        val ctx = getApplication<android.app.Application>()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { Trash.empty(ctx) }
+            onDone()
+            _messages.tryEmit("回收站已清空")
         }
     }
 
@@ -920,6 +958,10 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         _search.value = _search.value.copy(query = q)
     }
 
+    fun setSearchOptions(options: FileRepo.SearchOptions) {
+        _search.value = _search.value.copy(options = options)
+    }
+
     fun setSearchMode(mode: SearchMode) {
         if (_search.value.mode == mode) return
         _search.value = _search.value.copy(
@@ -940,35 +982,24 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
         )
         searchJob = viewModelScope.launch {
             val rootDir = File(s.root)
-            if (s.mode == SearchMode.CONTENT) {
-                val hits = withContext(Dispatchers.IO) {
-                    FileRepo.searchContent(
-                        root = rootDir,
-                        query = s.query,
-                        onProgress = { scanned, current ->
-                            _search.value = _search.value.copy(scanned = scanned, current = current)
-                        },
-                        cancelled = { !isActive }
-                    )
-                }
-                _search.value = _search.value.copy(running = false, finished = true, contentHits = hits)
-            } else {
-                val list = withContext(Dispatchers.IO) {
-                    FileRepo.search(
-                        root = rootDir,
-                        query = s.query,
-                        onProgress = { scanned, current ->
-                            _search.value = _search.value.copy(scanned = scanned, current = current)
-                        },
-                        cancelled = { !isActive }
-                    )
-                }
-                _search.value = _search.value.copy(
-                    running = false,
-                    finished = true,
-                    results = list.map { SearchResult(it, FileRepo.relativeTo(s.root, it.path)) }
+            val opts = s.options
+            val list = withContext(Dispatchers.IO) {
+                FileRepo.search(
+                    root = rootDir,
+                    query = s.query,
+                    options = opts,
+                    onProgress = { scanned, current ->
+                        _search.value = _search.value.copy(scanned = scanned, current = current)
+                    },
+                    cancelled = { !isActive }
                 )
             }
+            prefsStore.pushSearch(s.query.trim())
+            _search.value = _search.value.copy(
+                running = false,
+                finished = true,
+                results = list.map { SearchResult(it, FileRepo.relativeTo(s.root, it.path)) }
+            )
         }
     }
 

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.WrapText
 import androidx.compose.material.icons.outlined.Visibility
@@ -85,6 +87,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.nativeCanvas
@@ -235,6 +238,8 @@ fun EditorOverlay(
     var gotoOpen by remember { mutableStateOf(false) }
     var saveAsOpen by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var commandOpen by remember { mutableStateOf(false) }
+    var pluginInfo by remember { mutableStateOf(false) }
     var exitConfirm by remember { mutableStateOf(false) }
     var lineAnchor by remember { mutableIntStateOf(-1) }
 
@@ -405,8 +410,10 @@ fun EditorOverlay(
             fontFamily = FontFamily.Monospace
         )
     }
-    val highlight = remember(state.lang, codeColors) {
-        Syntax.CodeHighlightTransformation(state.lang, codeColors)
+    val plugin = remember(state.plugin) { com.suibian.sunfile.ui.editor.SyntaxPlugins.byId(state.plugin) }
+    val highlight = remember(state.lang, state.plugin, codeColors) {
+        if (plugin != null) Syntax.pluginTransformation(plugin, codeColors)
+        else Syntax.CodeHighlightTransformation(state.lang, codeColors)
     }
     // 大文本关闭高亮与补全：整篇着色是 O(n)，在 10 万字以上会把主线程拖死
     val heavy = value.text.length > 120_000 || state.totalBytes > 4L * 1024 * 1024
@@ -554,6 +561,29 @@ fun EditorOverlay(
                         EditorMenu("十六进制查看", Icons.Default.FormatLineSpacing) {
                             menuOpen = false
                             onOpenHex(state.file ?: file)
+                        }
+                        EditorMenu("命令面板", Icons.Default.Search) {
+                            menuOpen = false
+                            commandOpen = true
+                        }
+                        EditorMenu("格式化文档", Icons.Default.Code) {
+                            menuOpen = false
+                            val formatted = when (state.lang) {
+                                Lang.JSON -> Syntax.formatJson(value.text)
+                                Lang.XML, Lang.HTML -> Syntax.formatXml(value.text)
+                                else -> null
+                            }
+                            if (formatted == null) {
+                                Toast.makeText(context, "这个类型不支持格式化，或语法有误", Toast.LENGTH_SHORT).show()
+                            } else {
+                                value = TextFieldValue(formatted, TextRange(0))
+                                vm.updateText(formatted)
+                                Toast.makeText(context, "已格式化", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        EditorMenu("语法插件…", Icons.Default.Code) {
+                            menuOpen = false
+                            pluginInfo = true
                         }
                     }
                 }
@@ -893,6 +923,87 @@ fun EditorOverlay(
                 showHistory = false
             },
             onDismiss = { showHistory = false }
+        )
+    }
+
+    if (commandOpen) {
+        CommandPalette(
+            commands = listOf(
+                "查找" to { showFind = true },
+                "替换" to { replaceOpen = true },
+                "跳转到行" to { gotoOpen = true },
+                "格式化文档" to {
+                    val formatted = when (state.lang) {
+                        Lang.JSON -> Syntax.formatJson(value.text)
+                        Lang.XML, Lang.HTML -> Syntax.formatXml(value.text)
+                        else -> null
+                    }
+                    if (formatted != null) {
+                        value = TextFieldValue(formatted, TextRange(0))
+                        vm.updateText(formatted)
+                    } else {
+                        Toast.makeText(context, "不支持格式化", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                "切换注释" to {
+                    val sel = value.selection
+                    val result = toggleComment(
+                        value.text,
+                        lineIndexOf(value.text, sel.min),
+                        lineIndexOf(value.text, sel.max),
+                        commentPrefix(state.lang)
+                    )
+                    if (result != null) {
+                        value = TextFieldValue(result.first, TextRange(result.second.first, result.second.last))
+                        vm.updateText(result.first)
+                    }
+                },
+                if (wrap) "关闭自动换行" to { wrap = false; onEditorPrefs(null, false, null, null) }
+                else "开启自动换行" to { wrap = true; onEditorPrefs(null, true, null, null) },
+                "历史版本" to { showHistory = true },
+                "另存为" to { saveAsOpen = true },
+                if (state.lang == Lang.MARKDOWN) "预览 Markdown" to { previewOpen = true }
+                else "预览网页" to { previewOpen = true },
+                "语法插件" to { pluginInfo = true },
+                "十六进制查看" to { onOpenHex(state.file ?: file) }
+            ),
+            onDismiss = { commandOpen = false }
+        )
+    }
+
+    if (pluginInfo) {
+        val dir = remember { com.suibian.sunfile.ui.editor.SyntaxPlugins.userDir(context).absolutePath }
+        val installed = remember { com.suibian.sunfile.ui.editor.SyntaxPlugins.all() }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pluginInfo = false },
+            containerColor = SunColors.Surface4,
+            shape = SunShapes.Medium,
+            title = { Text("语法插件", color = SunColors.TextPrimary, fontSize = 16.sp) },
+            text = {
+                Column {
+                    Text(
+                        if (installed.isEmpty()) "还没有插件" else "已加载 " + installed.joinToString("、") { it.name },
+                        color = SunColors.TextSecondary,
+                        fontSize = 12.5.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("把 .json 放进下面这个目录，重新打开编辑器生效：", color = SunColors.TextTertiary, fontSize = 11.5.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(dir, color = SunColors.Accent, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "字段：id / name / extensions / keywords / lineComment / blockStart / blockEnd / caseInsensitive",
+                        color = SunColors.TextTertiary,
+                        fontSize = 10.5.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { pluginInfo = false }) {
+                    Text("知道了", color = SunColors.Accent, fontSize = 13.sp)
+                }
+            }
         )
     }
 
@@ -1348,4 +1459,64 @@ private fun CompletionDoc(item: CompletionItem?) {
             overflow = TextOverflow.Ellipsis
         )
     }
+}
+
+/** VS Code 式命令面板：输入过滤，回车/点击执行 */
+@Composable
+private fun CommandPalette(commands: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query) {
+        if (query.isBlank()) commands
+        else commands.filter { fuzzyHit(query, it.first) != null }
+            .sortedBy { fuzzyHit(query, it.first) ?: Int.MAX_VALUE }
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(SunShapes.Medium)
+                .background(SunColors.Surface4)
+                .padding(vertical = 12.dp)
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                textStyle = TextStyle(color = SunColors.TextPrimary, fontSize = 14.sp),
+                cursorBrush = SolidColor(SunColors.Accent),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+            Spacer(Modifier.height(1.dp).fillMaxWidth().background(SunColors.Hairline))
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                items(filtered.size) { i ->
+                    val (label, action) = filtered[i]
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onDismiss(); action() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(label, color = SunColors.TextPrimary, fontSize = 13.5.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 子序列模糊匹配，返回越小越靠前 */
+private fun fuzzyHit(query: String, text: String): Int? {
+    var i = 0
+    var score = 0
+    var last = -1
+    for (ch in text.lowercase()) {
+        if (i < query.length && ch == query.lowercase()[i]) {
+            if (last >= 0) score += 1
+            score += if (last < 0 || last == 0) 0 else 0
+            last = i
+            i++
+        }
+    }
+    return if (i == query.length) score else null
 }

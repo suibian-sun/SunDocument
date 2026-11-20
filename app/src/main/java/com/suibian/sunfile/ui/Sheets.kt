@@ -865,6 +865,79 @@ fun InputDialog(
     )
 }
 
+/**
+ * 删除确认：默认勾选「移到回收站」，取消勾选即永久删除。
+ * 这里单独成一个对话框，是因为删除是唯一会伤到数据的操作，
+ * 需要把后果写在按钮上方，而不是藏进菜单。
+ */
+@Composable
+fun DeleteDialog(
+    count: Int,
+    names: String,
+    onConfirm: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var toTrash by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface4,
+        shape = SunShapes.Medium,
+        title = { Text("删除 $count 项", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        text = {
+            Column {
+                Text(
+                    names,
+                    color = SunColors.TextSecondary,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    Modifier.fillMaxWidth().clickable { toTrash = !toTrash },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = toTrash,
+                        onCheckedChange = { toTrash = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = SunColors.Accent,
+                            uncheckedColor = SunColors.TextTertiary,
+                            checkmarkColor = Color.White
+                        ),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("移到回收站", color = SunColors.TextPrimary, fontSize = 13.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("30 天后清除", color = SunColors.TextTertiary, fontSize = 11.sp)
+                }
+                if (!toTrash) {
+                    Text(
+                        "将直接从磁盘删除，无法恢复",
+                        color = SunColors.Danger,
+                        fontSize = 11.5.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(toTrash) }) {
+                Text(
+                    if (toTrash) "移到回收站" else "永久删除",
+                    color = if (toTrash) SunColors.Accent else SunColors.Danger,
+                    fontSize = 13.sp
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp) }
+        }
+    )
+}
+
 @Composable
 fun ConfirmDialog(
     title: String,

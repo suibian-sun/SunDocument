@@ -158,52 +158,37 @@ fun FileTypeBadge(
     modifier: Modifier = Modifier
 ) {
     if (isDir) {
-        MtFolderIcon(modifier.size(size), SunColors.Folder)
+        MaterialFileIcon(file.name, isDir = true, size = size, modifier = modifier)
         return
     }
     val kind = FileKinds.kindOfName(file.name)
+    // 图片与视频仍优先给首帧，缩略图拿不到时回落到主题图标
     if (kind == FileKind.IMAGE || kind == FileKind.VIDEO) {
         ThumbBadge(file, kind == FileKind.VIDEO, size, modifier)
         return
     }
-    val ext = FileKinds.extensionOf(file)
-    val mark = if (kind == FileKind.TEXT || kind == FileKind.BINARY) langMarkOf(ext) else null
-    if (mark != null) {
-        LangBadge(mark, size, modifier)
-        return
-    }
-    PageBadge(
-        label = labelOf(ext),
-        color = extColor(ext, kind),
-        dotted = ext.isEmpty() || kind == FileKind.TEXT && ext in setOf("txt", "log", "nfo"),
-        modifier = modifier.size(size)
-    )
+    MaterialFileIcon(file.name, isDir = false, size = size, modifier = modifier)
 }
 
 @Composable
 private fun ThumbBadge(file: File, isVideo: Boolean, size: Dp, modifier: Modifier) {
     val bmp = rememberThumb(file, isVideo)
+    if (bmp == null) {
+        MaterialFileIcon(file.name, isDir = false, size = size, modifier = modifier)
+        return
+    }
     val shape = RoundedCornerShape(size * 0.18f)
     val fallback = extColor(FileKinds.extensionOf(file), FileKinds.kindOfName(file.name))
     Box(
         modifier.size(size).clip(shape).background(fallback.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center
     ) {
-        if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Icon(
-                if (isVideo) Icons.Outlined.Movie else Icons.Outlined.Image,
-                null,
-                tint = fallback.copy(alpha = 0.85f),
-                modifier = Modifier.size(size * 0.55f)
-            )
-        }
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
         if (isVideo) {
             Box(
                 Modifier

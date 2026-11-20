@@ -17,6 +17,25 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.2.0",
+            date = "2026-11-20",
+            title = "图标、搜索与文档编辑",
+            items = listOf(
+                "文件与文件夹图标换成 VS Code 的 material-icon-theme，覆盖 1100 多种格式",
+                "黑白配色按 MT 重新对齐：纯黑/纯白底、细分割线、蓝色强调",
+                "搜索改成 MT 面板：通配符/包含/正则、子目录开关、大小与时间过滤、搜索历史",
+                "新增回收站：删除二次确认，默认移入回收站，30 天自动清理，可还原",
+                "PPT 点开即可预览（含旧版 .ppt 文字抽取），不再跳第三方",
+                "文档可编辑：docx/pptx 改段落文字，xlsx/csv 改单元格",
+                "编辑器支持用户语法插件（JSON 规则），新增命令面板与 JSON/XML 格式化",
+                "列表图标与缩略图全部异步渲染，视频缩略图限制并发，滚动更稳",
+                "终端新增 ll / la 与权限提示，可直接读 Root 目录",
+                "支持 .tar.partaa 这类 tar 分卷",
+                "图片查看器新增详情：分辨率、体积与完整 EXIF",
+                "网页与 Markdown 可设置点击后：每次询问 / 直接预览 / 直接编辑"
+            )
+        ),
+        ChangeEntry(
             version = "1.1.0",
             date = "2026-11-20",
             title = "压缩格式、终端与稳定性",

@@ -5,10 +5,6 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.util.LruCache
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -100,9 +96,16 @@ object Thumbs {
 /** 组合函数：路径变化时重新取缩略图；离开组合后结果由 LruCache 持有 */
 @Composable
 fun rememberThumb(file: File, isVideo: Boolean): Bitmap? {
-    val state by produceState<Bitmap?>(initialValue = Thumbs.cached(file), file, isVideo) {
-        val hit = Thumbs.cached(file)
-        value = hit ?: withContext(Dispatchers.IO) { Thumbs.load(file, isVideo) }
+    // 走固定 2 线程的池：一屏几十个视频缩略图不会同时开几十个 MediaMetadataRetriever
+    val state = androidx.compose.runtime.remember(file, isVideo) {
+        androidx.compose.runtime.mutableStateOf(Thumbs.cached(file))
     }
-    return state
+    androidx.compose.runtime.LaunchedEffect(file, isVideo) {
+        if (state.value == null) {
+            Thumbs.request(file, isVideo) { bmp ->
+                state.value = bmp
+            }
+        }
+    }
+    return state.value
 }

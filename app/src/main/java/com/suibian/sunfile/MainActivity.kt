@@ -42,6 +42,10 @@ class MainActivity : ComponentActivity() {
         // MT2 目录放在内部存储根目录，卸载后数据仍在；不可写时自动退到应用专属目录
         kotlin.concurrent.thread(name = "mt2-init", isDaemon = true) {
             runCatching { Mt2.ensure(activity) }
+            // 图标映射表提前解析，列表首帧就不用等
+            runCatching { com.suibian.sunfile.data.IconTheme.ensureLoaded(activity) }
+            // 回收站 30 天到期清理，放在启动线程里，不占首帧
+            runCatching { com.suibian.sunfile.data.Trash.purgeExpired(activity) }
         }
         val prefsStore = PrefsStore.get(activity)
         setContent {

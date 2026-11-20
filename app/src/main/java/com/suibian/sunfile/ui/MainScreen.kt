@@ -151,7 +151,7 @@ import com.suibian.sunfile.data.SortMode
 import com.suibian.sunfile.ui.components.DrawCheck
 import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
-import com.suibian.sunfile.ui.components.MtFolderIcon
+import com.suibian.sunfile.ui.components.MaterialFileIcon
 import com.suibian.sunfile.ui.components.RollingNumber
 import com.suibian.sunfile.ui.components.ShimmerList
 import com.suibian.sunfile.ui.components.FileTypeBadge
@@ -179,6 +179,7 @@ sealed interface Page {
     data object Settings : Page
     data object Terminal : Page
     data object Changelog : Page
+    data object Trash : Page
 }
 
 /** 内置全屏查看器 */
@@ -231,6 +232,7 @@ fun MainScreen(
     var openFailure by remember { mutableStateOf<File?>(null) }
     var contextMenu by remember { mutableStateOf<Pair<FileEntry, Offset>?>(null) }
     var archiveVersion by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var trashTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
     var searchOpen by remember { mutableStateOf(false) }
     // 从压缩包内打开文件时记住来源，关掉查看器/编辑器后回到原来的压缩包位置
@@ -325,8 +327,24 @@ fun MainScreen(
 
     fun openFile(file: File, origin: Offset) {
         val ext = FileKinds.extensionOf(file)
+        // 网页 / Markdown 由设置决定：询问、直接预览、直接编辑
+        if (ext in setOf("html", "htm", "xhtml", "md", "markdown")) {
+            when (prefs.htmlMode) {
+                "PREVIEW" -> {
+                    viewer = Viewer.Web(file)
+                    return
+                }
+                "EDIT" -> {
+                    editorOrigin = origin
+                    editorTarget = file
+                    return
+                }
+            }
+        }
         val remembered = prefs.openWith[ext]
-        val mode = remembered ?: FileKinds.defaultMode(file)
+        // 以前的版本把 Office 记成了「用其他应用打开」；现在内置能读，就不再尊重这条旧记忆
+        val usable = if (remembered == OpenMode.EXTERNAL && FileKinds.isDocumentReadable(file)) null else remembered
+        val mode = usable ?: FileKinds.defaultMode(file)
         if (mode == null) {
             openWithTarget = file
         } else {
@@ -505,6 +523,17 @@ fun MainScreen(
 
                     Page.Changelog -> ChangelogPage(onBack = { page = Page.Settings })
 
+                    Page.Trash -> {
+                        val items = remember(trashTick) { vm.trashItems() }
+                        TrashPage(
+                            items = items,
+                            onBack = { page = Page.Settings },
+                            onRestore = { item -> vm.restoreTrash(item) { trashTick++ } },
+                            onPurge = { item -> vm.purgeTrash(item) { trashTick++ } },
+                            onEmpty = { vm.emptyTrash { trashTick++ } }
+                        )
+                    }
+
                     Page.Settings -> SettingsPage(
                         prefs = prefs,
                         showHidden = prefs.showHidden,
@@ -534,7 +563,9 @@ fun MainScreen(
                         onAbout = { dialog = DialogKind.About },
                         dataDir = remember { runCatching { com.suibian.sunfile.data.Mt2.root(context).absolutePath }.getOrDefault("") },
                         onOpenWithManager = { sheet = SheetKind.OpenWithManager },
-                        onChangelog = { page = Page.Changelog }
+                        onChangelog = { page = Page.Changelog },
+                        onTrash = { page = Page.Trash },
+                        onHtmlMode = { vm.prefsStore.setHtmlMode(it) }
                     )
                 }
             }
@@ -814,16 +845,14 @@ fun MainScreen(
             }
         )
 
-        is DialogKind.Delete -> ConfirmDialog(
-            title = "删除 ${d.paths.size} 项",
-            message = d.paths.take(4).joinToString("\n") { File(it).name } +
+        is DialogKind.Delete -> DeleteDialog(
+            count = d.paths.size,
+            names = d.paths.take(4).joinToString("\n") { File(it).name } +
                 if (d.paths.size > 4) "\n…" else "",
-            confirmText = "删除",
-            danger = true,
             onDismiss = { dialog = null },
-            onConfirm = {
+            onConfirm = { toTrash ->
                 dialog = null
-                vm.deletePaths(d.paths)
+                vm.deletePaths(d.paths, trash = toTrash)
             }
         )
 
@@ -951,21 +980,18 @@ fun MainScreen(
     if (searchOpen) {
         SearchDialog(
             state = searchState,
+            history = prefs.recentSearches,
             onDismiss = { searchOpen = false },
             onQueryChange = { vm.updateQuery(it) },
+            onOptionsChange = { vm.setSearchOptions(it) },
             onSearch = { vm.startSearch() },
             onCancel = { vm.cancelSearch() },
             onResult = { entry ->
                 searchOpen = false
                 vm.revealPath(entry)
             },
-            onModeChange = { vm.setSearchMode(it) },
-            onContentResult = { hit ->
-                searchOpen = false
-                editorLine = hit.line
-                editorOrigin = Offset.Zero
-                editorTarget = hit.file
-            }
+            onHistoryPick = { vm.updateQuery(it) },
+            onClearHistory = { vm.prefsStore.clearSearches() }
         )
     }
 
@@ -1656,9 +1682,11 @@ private fun UpRow(enabled: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        MtFolderIcon(
-            modifier = Modifier.size(28.dp),
-            tint = if (enabled) SunColors.Folder else SunColors.Folder.copy(alpha = 0.35f)
+        MaterialFileIcon(
+            name = "..",
+            isDir = true,
+            size = 28.dp,
+            modifier = Modifier.alpha(if (enabled) 1f else 0.35f)
         )
         Spacer(Modifier.width(13.dp))
         Text(

@@ -24,6 +24,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.SequenceInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.zip.GZIPOutputStream
@@ -38,15 +39,19 @@ import java.util.zip.GZIPOutputStream
 object Archives {
 
     enum class Kind {
-        ZIP, RAR, SEVEN_Z, TAR, TAR_GZ, TAR_BZ2, TAR_XZ, GZIP, BZIP2, XZ, UNSUPPORTED
+        ZIP, RAR, SEVEN_Z, TAR, TAR_GZ, TAR_BZ2, TAR_XZ, TAR_SPLIT, GZIP, BZIP2, XZ, UNSUPPORTED
     }
 
     private const val MAX_ENTRIES = 60_000
+
+    /** .tar.partaa / .tar.part01 这类分卷 */
+    private val SPLIT_NAME = Regex(""".+\.tar\.part[a-z0-9]{1,3}$""")
 
     fun kindOf(file: File): Kind {
         val name = file.name.lowercase()
         val ext = FileKinds.extensionOf(file)
         return when {
+            SPLIT_NAME.matches(name) -> Kind.TAR_SPLIT
             name.endsWith(".tar.gz") || ext == "tgz" -> Kind.TAR_GZ
             name.endsWith(".tar.bz2") || ext == "tbz" || ext == "tbz2" -> Kind.TAR_BZ2
             name.endsWith(".tar.xz") || ext == "txz" -> Kind.TAR_XZ
@@ -84,7 +89,7 @@ object Archives {
             Kind.ZIP -> zipEntries(file, password)
             Kind.RAR -> rarEntries(file, password)
             Kind.SEVEN_Z -> sevenZEntries(file, password)
-            Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ -> tarEntries(file)
+            Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ, Kind.TAR_SPLIT -> tarEntries(file)
             Kind.GZIP, Kind.BZIP2, Kind.XZ -> listOf(
                 FileRepo.ZipItem(
                     name = singleName(file),
@@ -195,7 +200,7 @@ object Archives {
             Kind.ZIP -> extractZip(file, entryName, destDir, password)
             Kind.RAR -> extractRar(file, entryName, destDir, password)
             Kind.SEVEN_Z -> extractSevenZ(file, entryName, destDir, password)
-            Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ -> extractTar(file, entryName, destDir)
+            Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ, Kind.TAR_SPLIT -> extractTar(file, entryName, destDir)
             Kind.GZIP, Kind.BZIP2, Kind.XZ -> {
                 val out = unique(destDir, singleName(file))
                 decompressSingle(file).use { input ->
@@ -215,7 +220,7 @@ object Archives {
         Kind.ZIP -> extractZipAll(file, destDir, password, onProgress)
         Kind.RAR -> extractRarAll(file, destDir, password, onProgress)
         Kind.SEVEN_Z -> extractSevenZAll(file, destDir, password, onProgress)
-        Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ -> extractTarAll(file, destDir, onProgress)
+        Kind.TAR, Kind.TAR_GZ, Kind.TAR_BZ2, Kind.TAR_XZ, Kind.TAR_SPLIT -> extractTarAll(file, destDir, onProgress)
         Kind.GZIP, Kind.BZIP2, Kind.XZ -> {
             val out = extractEntry(file, singleName(file), destDir, password)
             onProgress(out.name, 1, 1)
@@ -582,10 +587,21 @@ object Archives {
 
     // ---------------- 工具 ----------------
 
+    /** 分卷按文件名排序：partaa, partab … part01, part02 */
+    private fun splitParts(file: File): List<File> {
+        val base = file.name.substringBefore(".part")
+        val dir = file.parentFile ?: return listOf(file)
+        val parts = dir.listFiles { f -> f.name.startsWith("$base.part") }
+            ?.sortedBy { it.name }
+            .orEmpty()
+        return if (parts.isEmpty()) listOf(file) else parts
+    }
+
     private fun openTar(file: File): InputStream {
         val raw = BufferedInputStream(FileInputStream(file), 128 * 1024)
         return when (kindOf(file)) {
             Kind.TAR -> raw
+            Kind.TAR_SPLIT -> BufferedInputStream(SequenceInputStream(java.util.Collections.enumeration(splitParts(file).map { FileInputStream(it) })), 256 * 1024)
             Kind.TAR_GZ -> GzipCompressorInputStream(raw, true)
             Kind.TAR_BZ2 -> BZip2CompressorInputStream(raw, true)
             Kind.TAR_XZ -> XZCompressorInputStream(raw, true)

@@ -32,6 +32,7 @@ object DocParser {
             "docx", "docm" -> parseDocx(file)
             "xlsx", "xlsm" -> parseXlsx(file)
             "pptx", "pptm" -> parsePptx(file)
+            "ppt", "pps", "dps" -> parseLegacyPpt(file)
             "odt" -> parseOdf(file, tables = false)
             "ods" -> parseOdf(file, tables = true)
             "odp" -> parseOdf(file, tables = false)
@@ -162,6 +163,17 @@ object DocParser {
             }
         }
         return DocContent(blocks = blocks, meta = "${slides.size} 页")
+    }
+
+    /** 旧版 PPT：二进制复合文档，只能抽文字，但至少不用跳第三方 */
+    private fun parseLegacyPpt(file: File): DocContent {
+        val lines = LegacyPpt.extract(file)
+        if (lines.isEmpty()) throw java.io.IOException("无法从这个 PPT 中读出文字")
+        val blocks = ArrayList<DocBlock>()
+        lines.forEachIndexed { i, text ->
+            blocks.add(DocBlock(if (i == 0) DocStyle.HEADING else DocStyle.PARAGRAPH, text))
+        }
+        return DocContent(blocks = blocks, meta = "旧版 PPT · ${lines.size} 段")
     }
 
     // ---------------- odf ----------------

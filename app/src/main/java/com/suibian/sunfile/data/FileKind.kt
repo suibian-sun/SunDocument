@@ -80,6 +80,7 @@ object FileKinds {
 
     /** 只按文件名判断，不访问文件系统；列表里上千行时省掉一次 stat */
     fun kindOfName(name: String): FileKind {
+        if (name.lowercase().matches(Regex(""".+\.tar\.part[a-z0-9]{1,3}$"""))) return FileKind.ARCHIVE
         val ext = name.lowercase().let {
             when {
                 it.endsWith(".tar.gz") -> "tar.gz"
@@ -112,7 +113,8 @@ object FileKinds {
         val ext = extensionOf(file)
         return ext in setOf(
             "docx", "xlsx", "pptx", "odt", "ods", "odp", "csv", "tsv", "docm", "xlsm", "pptm",
-            "md", "markdown", "html", "htm", "xml", "json", "log", "ini", "conf", "yml", "yaml"
+            "ppt", "pps", "dps", "md", "markdown", "html", "htm", "xml", "json", "log",
+            "ini", "conf", "yml", "yaml"
         )
     }
 

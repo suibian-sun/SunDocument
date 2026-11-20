@@ -109,6 +109,29 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 - **代码高亮**：Markdown 单独按行着色（标题、引用、列表、行内代码、链接），代码注释 / 字符串 / 数字 / 注解随主题取色。
 - **历史版本**：每次保存前留档（单文件 30 版），可预览、恢复、清空。
 
+## 语法插件
+
+高亮规则可以自己加：把 JSON 放进外部目录的 `plugins/syntax/`，重开编辑器即生效。
+首次运行会写好一份 `toml.json` 当样例。
+
+```json
+{
+  "id": "toml",
+  "name": "TOML",
+  "extensions": ["toml", "lock"],
+  "keywords": ["true", "false", "table"],
+  "lineComment": "#",
+  "caseInsensitive": false
+}
+```
+
+可选字段：`blockStart` / `blockEnd` 定义块注释。命中扩展名后，编辑器的高亮与补全关键字都走这份规则。
+
+## 回收站
+
+删除默认进回收站（`Android/data/com.suibian.sunfile/files/trash`），保留 30 天；
+删除对话框里取消勾选才会直接从磁盘移除。回收站在「设置 → 回收站」里，可还原或彻底删除。
+
 ## 主题
 
 设置 → 外观：**跟随系统 / 白天 / 黑夜**，即时生效并持久化。
@@ -175,7 +198,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.1.0 -PappVersionCode=17
+./gradlew assembleRelease -PappVersionName=1.2.0 -PappVersionCode=18
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -186,7 +209,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.1.0 && git push origin v1.1.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.2.0 && git push origin v1.2.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -214,6 +237,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.2.0 | material-icon-theme 图标（1100+ 格式）；黑白配色对齐 MT；MT 式搜索面板（通配符/正则/大小/时间/内容/历史）；回收站（30 天）；PPT 内置预览（含 .ppt）；docx/pptx/xlsx 编辑；语法插件与命令面板；图标缩略图异步化；tar 分卷；图片 EXIF；网页/MD 打开方式 |
 | 1.1.0 | 7Z / RAR / BZ2 / XZ 读写与密码；压缩级别；压缩包内打开后返回原层级；侧边栏可滚动并显示可用空间；搜索改弹窗；语言图标；音乐居中；大文件防护；更新历史页；终端 Root；MT 配色 |
 | 1.0.0 | 双栏文件管理器骨架、文件浏览与基础操作、GitHub Actions 签名构建 |
 | 1.0.1 | 顶栏侧边抽屉 + 路径信息、竖三点工具栏、底部 5 图标栏、重命名为 SunDocument |
