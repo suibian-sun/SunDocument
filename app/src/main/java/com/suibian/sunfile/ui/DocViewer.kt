@@ -163,7 +163,7 @@ fun DocumentViewerOverlay(file: File, onClose: () -> Unit, onOpenExternal: (File
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("无法预览", color = SunColors.TextSecondary, fontSize = 13.sp)
+                Text("打不开这个文件", color = SunColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     error ?: "",
@@ -313,13 +313,45 @@ private fun DocBlockView(block: DocBlock) {
             )
         }
 
+        DocStyle.SLIDE -> {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 18.dp, bottom = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        block.level.toString().padStart(2, '0'),
+                        color = SunColors.Accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(1.dp)
+                            .background(SunColors.Hairline)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    block.text.ifBlank { "第 ${block.level} 页" },
+                    color = SunColors.TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 26.sp
+                )
+            }
+        }
+
         DocStyle.PARAGRAPH -> {
             Text(
                 block.text,
                 color = SunColors.TextSecondary,
                 fontSize = 13.sp,
                 lineHeight = 21.5.sp,
-                modifier = Modifier.padding(vertical = 4.dp)
+                modifier = Modifier.padding(start = if (block.level > 0) 19.dp else 0.dp, top = 2.dp, bottom = 2.dp)
             )
         }
     }

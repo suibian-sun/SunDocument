@@ -143,12 +143,14 @@ internal fun OverlayShell(
     subtitle: String,
     onClose: () -> Unit,
     background: Color = SunColors.Bg,
+    /** 返回 true 表示这一层自己处理掉了返回（例如压缩包先回上级目录） */
+    onBack: (() -> Boolean)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     content: @Composable () -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
-    BackHandler { onClose() }
+    BackHandler { if (onBack?.invoke() != true) onClose() }
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(Motion.Base, easing = Motion.EaseOut)) +
@@ -787,8 +789,21 @@ fun ArchiveOverlay(
 
     OverlayShell(
         title = file.name,
-        subtitle = list?.let { "${it.size} 个条目 · ${Fmt.size(file.length())} · ${kindLabel(file)}" } ?: "读取中…",
-        onClose = onClose,
+        subtitle = when {
+            list == null -> "读取中…"
+            prefix.isEmpty() -> "${list.size} 个条目 · ${Fmt.size(file.length())} · ${kindLabel(file)}"
+            else -> "/" + prefix.removeSuffix("/")
+        },
+        // 压缩包内的文件夹按返回先回上级，到根层才退出预览
+        onBack = {
+            if (prefix.isEmpty()) false else {
+                prefix = parentPrefix(prefix)
+                true
+            }
+        },
+        onClose = {
+            if (prefix.isEmpty()) onClose() else prefix = parentPrefix(prefix)
+        },
         actions = {
             if (FileKinds.isZipReadable(file) && Archives.kindOf(file) == Archives.Kind.ZIP) {
                 IconButton(onClick = onAddFiles, modifier = Modifier.size(40.dp)) {

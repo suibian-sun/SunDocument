@@ -698,4 +698,44 @@ object Syntax {
         if (i == 0) null else sb.toString().trimEnd()
     }.getOrNull()
 
+
+    /**
+     * 严格模式的错误定位：扫描括号与字符串，返回第一个不平衡的位置所在行。
+     * 格式化失败时用它告诉用户「哪一行有问题」，而不是只说一句语法错误。
+     */
+    fun jsonErrorLine(text: String): Int? {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var line = 1
+        var lastOpenLine = 0
+        for (ch in text) {
+            if (ch == '\n') line++
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    ch == '\\' -> escaped = true
+                    ch == '"' -> inString = false
+                }
+                continue
+            }
+            when (ch) {
+                '"' -> inString = true
+                '{', '[' -> {
+                    depth++
+                    lastOpenLine = line
+                }
+                '}', ']' -> {
+                    depth--
+                    if (depth < 0) return line
+                }
+            }
+        }
+        return when {
+            inString -> line
+            depth > 0 -> lastOpenLine.coerceAtLeast(1)
+            else -> null
+        }
+    }
+
 }

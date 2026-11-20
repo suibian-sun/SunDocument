@@ -91,9 +91,10 @@ fun MaterialFileIcon(
         }
     }
     val bmp = bitmap
-    if (bmp != null) {
+    val image = remember(bmp) { bmp?.asImageBitmap() }
+    if (bmp != null && image != null) {
         Image(
-            bitmap = bmp.asImageBitmap(),
+            bitmap = image,
             contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = modifier.size(size)

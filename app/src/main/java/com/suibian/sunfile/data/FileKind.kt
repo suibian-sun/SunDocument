@@ -12,6 +12,7 @@ enum class OpenMode(val label: String) {
     AUDIO("音乐播放器"),
     VIDEO("视频播放器"),
     DOCUMENT("文档查看器"),
+    PDF("PDF 阅读器"),
     ARCHIVE("压缩包浏览器"),
     AXML("AXML 反编译"),
     DEX("Dex 结构浏览"),
@@ -45,7 +46,8 @@ object FileKinds {
     private val OFFICE = setOf(
         "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "wps", "et",
         "dps", "rtf", "csv", "tsv", "pages", "numbers", "key", "docm", "xlsm", "pptm",
-        "dotx", "xltx", "potx", "dot", "xlt", "pot"
+        "dotx", "xltx", "potx", "dot", "xlt", "pot", "ppsx", "pps", "potm", "xltm",
+        "wps", "wpt", "et", "ett", "dpt"
     )
     private val TEXT = setOf(
         "txt", "md", "markdown", "json", "json5", "xml", "yml", "yaml", "ini", "conf", "cfg",
@@ -108,15 +110,11 @@ object FileKinds {
         return Archives.supported(file)
     }
 
-    /** 该文件是否能用内置文档查看器打开 */
-    fun isDocumentReadable(file: File): Boolean {
-        val ext = extensionOf(file)
-        return ext in setOf(
-            "docx", "xlsx", "pptx", "odt", "ods", "odp", "csv", "tsv", "docm", "xlsm", "pptm",
-            "ppt", "pps", "dps", "md", "markdown", "html", "htm", "xml", "json", "log",
-            "ini", "conf", "yml", "yaml"
-        )
-    }
+    /**
+     * 该文件是否能用内置文档查看器打开。
+     * 现在的解析器按文件内容判断（zip / OLE），不看扩展名，所以整个 Office 大类都算。
+     */
+    fun isDocumentReadable(file: File): Boolean = kindOfName(file.name) == FileKind.OFFICE
 
     /** 可以显示首帧缩略图的类型 */
     fun hasThumbnail(file: File): Boolean {
@@ -132,8 +130,8 @@ object FileKinds {
         FileKind.ARCHIVE, FileKind.APK -> if (isZipReadable(file)) OpenMode.ARCHIVE else OpenMode.EXTERNAL
         FileKind.AUDIO -> OpenMode.AUDIO
         FileKind.VIDEO -> OpenMode.VIDEO
-        FileKind.OFFICE -> if (isDocumentReadable(file)) OpenMode.DOCUMENT else OpenMode.EXTERNAL
-        FileKind.PDF -> OpenMode.EXTERNAL
+        FileKind.OFFICE -> OpenMode.DOCUMENT
+        FileKind.PDF -> OpenMode.PDF
         FileKind.BINARY -> null
     }
 }

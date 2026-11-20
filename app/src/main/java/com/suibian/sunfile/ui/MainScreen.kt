@@ -61,6 +61,7 @@ import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -180,6 +181,9 @@ sealed interface Page {
     data object Terminal : Page
     data object Changelog : Page
     data object Trash : Page
+    data object Saf : Page
+    data object SysInfo : Page
+    data object Plugins : Page
 }
 
 /** 内置全屏查看器 */
@@ -190,6 +194,7 @@ private sealed interface Viewer {
     data class Audio(val file: File, val playlist: List<File>) : Viewer
     data class Video(val file: File, val playlist: List<File>) : Viewer
     data class Doc(val file: File) : Viewer
+    data class Pdf(val file: File) : Viewer
     data class Compare(val left: File, val right: File) : Viewer
     data class Reverse(val file: File, val tab: Int = 0) : Viewer
     data class Web(val file: File) : Viewer
@@ -233,6 +238,8 @@ fun MainScreen(
     var contextMenu by remember { mutableStateOf<Pair<FileEntry, Offset>?>(null) }
     var archiveVersion by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var trashTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var safPath by remember { mutableStateOf("primary:Android/data") }
+    var pluginOutput by remember { mutableStateOf<String?>(null) }
     var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
     var searchOpen by remember { mutableStateOf(false) }
     // 从压缩包内打开文件时记住来源，关掉查看器/编辑器后回到原来的压缩包位置
@@ -317,6 +324,7 @@ fun MainScreen(
             OpenMode.AUDIO -> viewer = Viewer.Audio(file, playlistOf(file, FileKind.AUDIO))
             OpenMode.VIDEO -> viewer = Viewer.Video(file, playlistOf(file, FileKind.VIDEO))
             OpenMode.DOCUMENT -> viewer = Viewer.Doc(file)
+            OpenMode.PDF -> viewer = Viewer.Pdf(file)
             OpenMode.ARCHIVE -> viewer = Viewer.Archive(file)
             OpenMode.AXML -> viewer = Viewer.Reverse(file, 1)
             OpenMode.DEX -> viewer = Viewer.Reverse(file, 2)
@@ -342,9 +350,10 @@ fun MainScreen(
             }
         }
         val remembered = prefs.openWith[ext]
-        // 以前的版本把 Office 记成了「用其他应用打开」；现在内置能读，就不再尊重这条旧记忆
-        val usable = if (remembered == OpenMode.EXTERNAL && FileKinds.isDocumentReadable(file)) null else remembered
-        val mode = usable ?: FileKinds.defaultMode(file)
+        // 早期版本把 Office / 压缩包记成了「用其他应用打开」，这些旧记忆一律作废
+        val stale = remembered == OpenMode.EXTERNAL &&
+            (FileKinds.isDocumentReadable(file) || FileKinds.isZipReadable(file))
+        val mode = (if (stale) null else remembered) ?: FileKinds.defaultMode(file)
         if (mode == null) {
             openWithTarget = file
         } else {
@@ -395,6 +404,15 @@ fun MainScreen(
                 },
                 onTerminal = {
                     page = Page.Terminal
+                    scope.launch { drawerState.close() }
+                },
+                onSaf = { path ->
+                    safPath = path
+                    page = Page.Saf
+                    scope.launch { drawerState.close() }
+                },
+                onSysInfo = {
+                    page = Page.SysInfo
                     scope.launch { drawerState.close() }
                 }
             )
@@ -523,6 +541,26 @@ fun MainScreen(
 
                     Page.Changelog -> ChangelogPage(onBack = { page = Page.Settings })
 
+                    Page.Saf -> SafPage(
+                        path = safPath,
+                        label = if (safPath.endsWith("obb")) "Android/obb" else "Android/data",
+                        onBack = { page = Page.Files },
+                        onOpen = { f -> openFromList(f, Offset.Zero) },
+                        onExport = { node ->
+                            val dest = panes[active].currentDir
+                            val out = com.suibian.sunfile.data.SafRepo.copyTo(context, node, dest)
+                            Toast.makeText(
+                                context,
+                                if (out != null) "已导出到 ${dest.name}" else "导出失败",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    )
+
+                    Page.SysInfo -> SystemInfoPage(onBack = { page = Page.Files })
+
+                    Page.Plugins -> PluginPage(onBack = { page = Page.Settings })
+
                     Page.Trash -> {
                         val items = remember(trashTick) { vm.trashItems() }
                         TrashPage(
@@ -565,7 +603,8 @@ fun MainScreen(
                         onOpenWithManager = { sheet = SheetKind.OpenWithManager },
                         onChangelog = { page = Page.Changelog },
                         onTrash = { page = Page.Trash },
-                        onHtmlMode = { vm.prefsStore.setHtmlMode(it) }
+                        onHtmlMode = { vm.prefsStore.setHtmlMode(it) },
+                        onPlugins = { page = Page.Plugins }
                     )
                 }
             }
@@ -589,6 +628,16 @@ fun MainScreen(
         val target = entry.file
         val paths = listOf(entry.path)
         val isApk = target.extension.equals("apk", true)
+        val selectedFiles = remember(entry.path, pane.selectionMode, pane.selected.size) {
+            if (pane.selectionMode && pane.selected.isNotEmpty()) {
+                panes[active].entries.filter { pane.selected.contains(it.path) }.map { it.file }
+            } else {
+                listOf(target)
+            }
+        }
+        val pluginActions = remember(entry.path, selectedFiles) {
+            runCatching { com.suibian.sunfile.data.Plugins.actionsFor(context, selectedFiles) }.getOrDefault(emptyList())
+        }
         EntryActionMenu(
             entry = entry,
             anchor = anchorPos,
@@ -605,8 +654,8 @@ fun MainScreen(
                 if (!entry.isDir) {
                     add(EntryAction(Icons.Outlined.OpenInNew, "打开方式…") { openWithTarget = target })
                 }
-                add(EntryAction(Icons.Outlined.ContentCopy, "复制到另一栏", "双栏") { vm.copyToOtherPane(paths) })
-                add(EntryAction(Icons.Outlined.ContentCut, "移动到另一栏", "双栏") { vm.moveToOtherPane(paths) })
+                add(EntryAction(Icons.Outlined.ContentCopy, "复制到另一栏") { vm.copyToOtherPane(paths) })
+                add(EntryAction(Icons.Outlined.ContentCut, "移动到另一栏") { vm.moveToOtherPane(paths) })
                 add(EntryAction(Icons.Outlined.ContentCopy, "复制") {
                     vm.selectOnly(entry)
                     vm.setClipboard(false)
@@ -664,6 +713,29 @@ fun MainScreen(
                         vm.toggleBookmark(if (entry.isDir) entry.path else (target.parent ?: entry.path))
                     }
                 )
+                pluginActions.forEach { act ->
+                    add(
+                        EntryAction(
+                            Icons.Outlined.Code,
+                            act.label,
+                            act.pluginName
+                        ) {
+                            scope.launch {
+                                val out = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    runCatching {
+                                        com.suibian.sunfile.data.Plugins.run(
+                                            context,
+                                            act,
+                                            selectedFiles,
+                                            com.suibian.sunfile.data.Shell.rootAvailable
+                                        )
+                                    }.getOrElse { e -> "执行失败：${e.message}" }
+                                }
+                                pluginOutput = out?.ifBlank { "没有输出" } ?: "没有输出"
+                            }
+                        }
+                    )
+                }
                 add(EntryAction(Icons.Outlined.Delete, "删除", danger = true) {
                     dialog = DialogKind.Delete(paths)
                 })
@@ -947,6 +1019,44 @@ fun MainScreen(
         null -> Unit
     }
 
+    // 插件执行结果
+    pluginOutput?.let { text ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pluginOutput = null },
+            containerColor = SunColors.Surface4,
+            shape = SunShapes.Medium,
+            title = { Text("插件输出", color = SunColors.TextPrimary, fontSize = 15.sp) },
+            text = {
+                Column(
+                    Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text,
+                        color = SunColors.TextSecondary,
+                        fontSize = 11.5.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        lineHeight = 17.sp
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("plugin", text))
+                    Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                    pluginOutput = null
+                }) { Text("复制", color = SunColors.Accent, fontSize = 13.sp) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pluginOutput = null }) {
+                    Text("关闭", color = SunColors.TextSecondary, fontSize = 13.sp)
+                }
+            }
+        )
+    }
+
     // 无法用系统应用打开时的兜底
     openFailure?.let { file ->
         if (openWithTarget == null) {
@@ -1067,6 +1177,7 @@ fun MainScreen(
         is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Video -> VideoViewerOverlay(v.file, v.playlist) { closeViewer() }
+        is Viewer.Pdf -> PdfViewerOverlay(v.file) { closeViewer() }
         is Viewer.Doc -> DocumentViewerOverlay(
             file = v.file,
             onClose = { closeViewer() },
@@ -1474,7 +1585,7 @@ private fun TopBar(
                 ToolMenuItem(
                     if (showHidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                     if (showHidden) "隐藏隐藏文件" else "显示隐藏文件",
-                    "以 . 开头"
+                    null
                 ) {
                     onOverflowChange(false); onToggleHidden()
                 }
@@ -2231,7 +2342,9 @@ private fun DrawerContent(
     onSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
     onAbout: () -> Unit,
-    onTerminal: () -> Unit = {}
+    onTerminal: () -> Unit = {},
+    onSaf: (String) -> Unit = {},
+    onSysInfo: () -> Unit = {}
 ) {
     val shortcuts = listOf(
         Triple("内部存储", "/storage/emulated/0", Icons.Outlined.Storage),
@@ -2346,6 +2459,9 @@ private fun DrawerContent(
                     onBookmarks
                 )
                 DrawerItem(Icons.Outlined.Terminal, "终端", false, onTerminal)
+                DrawerItem(Icons.Outlined.FolderOpen, "Android/data", false) { onSaf("primary:Android/data") }
+                DrawerItem(Icons.Outlined.FolderOpen, "Android/obb", false) { onSaf("primary:Android/obb") }
+                DrawerItem(Icons.Outlined.Info, "系统信息", false, onSysInfo)
                 DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
                 DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
                 DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)

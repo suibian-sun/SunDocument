@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
@@ -75,7 +76,8 @@ fun SettingsPage(
     onOpenWithManager: () -> Unit = {},
     onChangelog: () -> Unit = {},
     onTrash: () -> Unit = {},
-    onHtmlMode: (String) -> Unit = {}
+    onHtmlMode: (String) -> Unit = {},
+    onPlugins: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -110,9 +112,10 @@ fun SettingsPage(
             SectionTitle("更新")
             SwitchRow("启动时检查更新", "打开应用后自动读取 GitHub Release", prefs.autoCheckUpdate, onToggleAutoCheck)
             SwitchRow("下载加速", "优先使用公共镜像线路，失败自动回退", prefs.useAccelerator, onToggleAccelerator)
-            ValueRow("立即检查更新", "当前 v${BuildConfig.VERSION_NAME}", onCheckUpdate)
-            ValueRow("历史更新", "查看每个版本改了什么", onChangelog)
-            ValueRow("回收站", "已删除的文件保留 30 天", onTrash)
+            ValueRow("检查更新", "v${BuildConfig.VERSION_NAME}", onCheckUpdate)
+            ValueRow("历史更新", "", onChangelog)
+            ValueRow("回收站", "", onTrash)
+            ValueRow("插件", "", onPlugins)
 
             ValueRow(
                 "网页与 Markdown",
@@ -164,8 +167,8 @@ fun SettingsPage(
             )
 
             SectionTitle("打开方式")
-            ValueRow("默认打开方式", "${prefs.openWith.size} 个类型已指定 · 点击管理", onOpenWithManager)
-            ValueRow("清除记住的打开方式", "恢复为按类型自动判断", onClearOpenWith)
+            ValueRow("默认打开方式", "${prefs.openWith.size} 个", onOpenWithManager)
+            ValueRow("清除记住的打开方式", "", onClearOpenWith)
             ValueRow("清除最近访问", "${prefs.recent.size} 条记录", onClearRecent)
 
             SectionTitle("数据目录")
@@ -235,14 +238,22 @@ private fun ValueRow(title: String, value: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, color = SunColors.TextPrimary, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
-        Text(
-            value,
-            color = SunColors.TextTertiary,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-            textAlign = androidx.compose.ui.text.style.TextAlign.End
+        if (value.isNotEmpty()) {
+            Text(
+                value,
+                color = SunColors.TextTertiary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+                textAlign = androidx.compose.ui.text.style.TextAlign.End
+            )
+        }
+        Icon(
+            androidx.compose.material.icons.Icons.Outlined.ArrowForward,
+            null,
+            tint = SunColors.TextTertiary.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp)
         )
     }
 }

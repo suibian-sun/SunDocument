@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.2.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 18
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.3.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 19
 
 android {
     namespace = "com.suibian.sunfile"
@@ -103,6 +103,8 @@ dependencies {
     implementation("com.caverock:androidsvg-aar:1.4")
     // 图片详情里的 EXIF
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // 免 Root 访问 Android/data：SAF 目录
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

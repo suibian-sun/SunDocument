@@ -1,6 +1,7 @@
 package com.suibian.sunfile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +20,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,12 +45,48 @@ fun CompareOverlay(left: File, right: File, onClose: () -> Unit) {
     val result by produceState<CompareResult?>(initialValue = null, left, right) {
         value = withContext(Dispatchers.IO) { runCatching { Compare.of(left, right) }.getOrElse { CompareResult.Failed(it.message ?: "对比失败") } }
     }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var hex by remember { mutableStateOf(false) }
+    var saveTick by remember { mutableIntStateOf(0) }
 
     OverlayShell(
-        title = "文件对比",
+        title = if (hex) "十六进制对比" else "文件对比",
         subtitle = "${left.name}  ↔  ${right.name}",
-        onClose = onClose
+        onClose = onClose,
+        actions = {
+            if (hex) {
+                Text(
+                    "保存",
+                    color = SunColors.Accent,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier
+                        .clickable { saveTick++ }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+            Text(
+                if (hex) "文本" else "HEX",
+                color = SunColors.TextSecondary,
+                fontSize = 12.5.sp,
+                modifier = Modifier
+                    .clickable {
+                        hex = !hex
+                        saveTick = 0
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
     ) {
+        if (hex) {
+            HexCompareBody(left, right, saveTick) {
+                android.widget.Toast.makeText(
+                    ctx,
+                    "已写回 ${right.name}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+            return@OverlayShell
+        }
         when (val r = result) {
             null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(22.dp), color = SunColors.Accent, strokeWidth = 2.dp)

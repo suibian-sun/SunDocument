@@ -416,7 +416,7 @@ fun EditorOverlay(
         else Syntax.CodeHighlightTransformation(state.lang, codeColors)
     }
     // 大文本关闭高亮与补全：整篇着色是 O(n)，在 10 万字以上会把主线程拖死
-    val heavy = value.text.length > 120_000 || state.totalBytes > 4L * 1024 * 1024
+    val heavy = value.text.length > 60_000 || state.totalBytes > 2L * 1024 * 1024
 
     CircularReveal(origin = origin, visible = visible, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -574,7 +574,12 @@ fun EditorOverlay(
                                 else -> null
                             }
                             if (formatted == null) {
-                                Toast.makeText(context, "这个类型不支持格式化，或语法有误", Toast.LENGTH_SHORT).show()
+                                val line = if (state.lang == Lang.JSON) Syntax.jsonErrorLine(value.text) else null
+                                Toast.makeText(
+                                    context,
+                                    if (line != null) "第 $line 行附近括号或引号不匹配" else "这个类型不支持格式化",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             } else {
                                 value = TextFieldValue(formatted, TextRange(0))
                                 vm.updateText(formatted)

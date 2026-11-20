@@ -33,22 +33,41 @@ object Thumbs {
     fun cached(file: File): Bitmap? = cache.get(key(file))
 
     /** 同步取（会在调用线程解码，仅用于已经在后台的场景） */
-    fun load(file: File, isVideo: Boolean): Bitmap? {
+    fun load(file: File, kind: ThumbKind): Bitmap? {
         val k = key(file)
         cache.get(k)?.let { return it }
         val bmp = runCatching {
-            if (isVideo) videoFrame(file) else imageThumb(file)
+            when (kind) {
+                ThumbKind.VIDEO -> videoFrame(file)
+                ThumbKind.AUDIO -> audioCover(file)
+                ThumbKind.IMAGE -> imageThumb(file)
+            }
         }.getOrNull() ?: return null
         cache.put(k, bmp)
         return bmp
     }
 
     /** 异步取：命中缓存立即返回，否则后台解码一次 */
-    fun request(file: File, isVideo: Boolean, onReady: (Bitmap) -> Unit) {
+    fun request(file: File, kind: ThumbKind, onReady: (Bitmap) -> Unit) {
         cached(file)?.let { onReady(it); return }
         pool.execute {
-            val bmp = load(file, isVideo) ?: return@execute
+            val bmp = load(file, kind) ?: return@execute
             onReady(bmp)
+        }
+    }
+
+    /** 音频内嵌封面：没有封面就返回 null，由调用方退回格式图标 */
+    private fun audioCover(file: File): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val art = retriever.embeddedPicture ?: return null
+            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+            BitmapFactory.decodeByteArray(art, 0, art.size, opts)
+        } catch (e: Throwable) {
+            null
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 
@@ -93,16 +112,18 @@ object Thumbs {
     }
 }
 
+enum class ThumbKind { IMAGE, VIDEO, AUDIO }
+
 /** 组合函数：路径变化时重新取缩略图；离开组合后结果由 LruCache 持有 */
 @Composable
-fun rememberThumb(file: File, isVideo: Boolean): Bitmap? {
+fun rememberThumb(file: File, kind: ThumbKind): Bitmap? {
     // 走固定 2 线程的池：一屏几十个视频缩略图不会同时开几十个 MediaMetadataRetriever
-    val state = androidx.compose.runtime.remember(file, isVideo) {
+    val state = androidx.compose.runtime.remember(file, kind) {
         androidx.compose.runtime.mutableStateOf(Thumbs.cached(file))
     }
-    androidx.compose.runtime.LaunchedEffect(file, isVideo) {
+    androidx.compose.runtime.LaunchedEffect(file, kind) {
         if (state.value == null) {
-            Thumbs.request(file, isVideo) { bmp ->
+            Thumbs.request(file, kind) { bmp ->
                 state.value = bmp
             }
         }

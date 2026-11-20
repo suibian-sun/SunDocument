@@ -33,7 +33,8 @@
 | 场景 | 行为 |
 | --- | --- |
 | 内部存储、SD 卡 | 授予「所有文件访问权限」后全量读写，无虚拟条目 |
-| `/`、`/system`、`/data`、`/vendor`、`Android/data` | 普通应用被 SELinux / scoped storage 拦住，**在设置里获取 Root 后直接读真实内容**（`ls` / `cat` / `cp` / `chmod`） |
+| `Android/data`、`Android/obb` | **免 Root**：侧边栏点进去按提示授权一次（SAF），之后可浏览、导出、改名、删除；授权随时可撤销 |
+| `/`、`/system`、`/data`、`/vendor` | 普通应用被 SELinux 与内核沙箱拦住，**在设置里获取 Root 后直接读真实内容**（`ls` / `cat` / `cp` / `chmod`）；未 Root 时「系统信息」页会列出哪些目录还能读 |
 | 未 Root 且不可读 | 显示一行原因 + 「获取 Root」「返回上级」，不崩溃、不再伪造挂载点 |
 
 Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免未 Root 设备每次进入受限目录都弹授权框。
@@ -127,6 +128,40 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 
 可选字段：`blockStart` / `blockEnd` 定义块注释。命中扩展名后，编辑器的高亮与补全关键字都走这份规则。
 
+## 插件
+
+插件包后缀 `.mtp`，本质是 zip，与 MT 的结构一致：
+
+```
+manifest.json      必填，声明 id / 名称 / 版本 / actions
+classes.dex        可选，插件代码（也可放 libs/*.jar）
+assets/            可选，资源
+icon.png           可选，图标
+```
+
+`manifest.json` 允许注释与裸键，和 MT 一样：
+
+```json
+{
+  pluginSdkVersion: 2,
+  pluginID: "cc.sun.demo",
+  versionCode: 1,
+  versionName: "1.0",
+  name: "示例插件",
+  description: "算个 MD5",
+  interfaces: [],
+  actions: [
+    { id: "md5", label: "计算 MD5", script: "md5sum ${files}", extensions: ["*"] }
+  ]
+}
+```
+
+两种动作：`script` 走 shell（`${files}` 会替换成选中路径）；`class` 指向 dex 里的类，
+宿主按 `run(Context, List<File>): String?` 反射调用，也兼容 `run(Context, String[])` 与 `run()`。
+装上后动作出现在文件长按菜单，输出在对话框里显示，可一键复制。
+
+安装入口：设置 → 插件 → 安装；空列表时可以直接装一个示例插件试手感。
+
 ## 回收站
 
 删除默认进回收站（`Android/data/com.suibian.sunfile/files/trash`），保留 30 天；
@@ -198,7 +233,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.2.0 -PappVersionCode=18
+./gradlew assembleRelease -PappVersionName=1.3.0 -PappVersionCode=19
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -209,7 +244,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.2.0 && git push origin v1.2.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.3.0 && git push origin v1.3.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -223,9 +258,9 @@ export ANDROID_HOME=/path/to/android-sdk
 
 ## 已知限制
 
-- `/data`、`/system`、`Android/data` 等目录受 SELinux 与 scoped storage 限制，**未 Root 时任何第三方应用都读不到**（MT 管理器同样依赖 Root）。本应用提供一键 Root，获取后即为真实数据。
+- `/data`、`/system` 受内核沙箱限制，**未 Root 时任何第三方应用都读不到**（MT 管理器同样依赖 Root），本应用提供一键 Root。`Android/data`、`Android/obb` 在 Android 13 起连 SAF 也逐步收紧，个别 ROM 会拒绝授权，这时只能靠 Root。
 - 压缩包：zip / 7z / rar / tar / tar.gz / tar.bz2 / tar.xz / gz / bz2 / xz 均可浏览与解压；创建支持 zip / 7z / tar / tar.gz，其中 **AES-256 密码仅 ZIP**（7z 写入侧加密库不完整，暂不提供）。RAR5 的个别压缩算法可能解不出，会明确提示。
-- 旧版二进制 doc / xls / ppt 无法在应用内解析，会提示用其他应用打开（docx / xlsx / pptx 不受影响）。
+- 老式 doc / xls / ppt 走二进制抽样（Word 的 piece table、Excel 的 BIFF8、PPT 的 TextCharsAtom），只保证文字与表格能读出来，样式与图片不还原。
 - 超过 12 万字的文本自动关闭整篇着色与补全（整段重排已经很重，优先保证输入流畅）；打开超过 32 MB 的文件会提示改用十六进制编辑器。
 - 分段载入的超长文件暂不支持撤销 / 重做，避免与未载入的尾部错位。
 - 十六进制编辑器单次最多载入 6 MB；更大的文件只读浏览，保存按钮会隐藏，避免只写回前半段。
@@ -237,6 +272,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.3.0 | Office 按内容识别（含老式 ppt/doc/xls）；PPT 分页排版；PDF 内置阅读器；压缩包返回先回上级；.mtp 插件体系；免 Root 浏览 Android/data 与 obb；系统信息页；HEX 对比可改字节；打开方式分页；音频封面；设置页精简 |
 | 1.2.0 | material-icon-theme 图标（1100+ 格式）；黑白配色对齐 MT；MT 式搜索面板（通配符/正则/大小/时间/内容/历史）；回收站（30 天）；PPT 内置预览（含 .ppt）；docx/pptx/xlsx 编辑；语法插件与命令面板；图标缩略图异步化；tar 分卷；图片 EXIF；网页/MD 打开方式 |
 | 1.1.0 | 7Z / RAR / BZ2 / XZ 读写与密码；压缩级别；压缩包内打开后返回原层级；侧边栏可滚动并显示可用空间；搜索改弹窗；语言图标；音乐居中；大文件防护；更新历史页；终端 Root；MT 配色 |
 | 1.0.0 | 双栏文件管理器骨架、文件浏览与基础操作、GitHub Actions 签名构建 |

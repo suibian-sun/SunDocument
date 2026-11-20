@@ -4,9 +4,10 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /** 文档里的一段内容，UI 按样式排版 */
-enum class DocStyle { TITLE, HEADING, SUBHEADING, PARAGRAPH, BULLET, QUOTE, CODE }
+enum class DocStyle { TITLE, HEADING, SUBHEADING, PARAGRAPH, BULLET, QUOTE, CODE, SLIDE }
 
-data class DocBlock(val style: DocStyle, val text: String)
+/** level 对 SLIDE 表示页码，其余样式不使用 */
+data class DocBlock(val style: DocStyle, val text: String, val level: Int = 0)
 
 /** 表格页（xlsx / ods / csv），rows 只保留非空单元格 */
 data class SheetTable(val name: String, val rows: List<List<String>>)
@@ -28,20 +29,102 @@ object DocParser {
 
     fun parse(file: File): DocContent {
         val ext = FileKinds.extensionOf(file)
+        // 扩展名不可靠：.wps / .et 既可能是新版 zip，也可能是二进制；统一按内容判断
+        val head = headOf(file)
+        val isZip = head.size >= 2 && head[0] == 0x50.toByte() && head[1] == 0x4B.toByte()
+        val isOle = head.size >= 4 && head[0] == 0xD0.toByte() && head[1] == 0xCF.toByte() &&
+            head[2] == 0x11.toByte() && head[3] == 0xE0.toByte()
+
+        if (isZip) zipDocument(file, ext)?.let { return it }
+        if (isOle) oleDocument(file)?.let { return it }
+
         return when (ext) {
-            "docx", "docm" -> parseDocx(file)
-            "xlsx", "xlsm" -> parseXlsx(file)
-            "pptx", "pptm" -> parsePptx(file)
-            "ppt", "pps", "dps" -> parseLegacyPpt(file)
-            "odt" -> parseOdf(file, tables = false)
-            "ods" -> parseOdf(file, tables = true)
-            "odp" -> parseOdf(file, tables = false)
             "csv", "tsv" -> DocContent(
-                sheets = listOf(SheetTable(file.nameWithoutExtension, parseDelimited(file, if (ext == "tsv") '\t' else ','))),
+                sheets = listOf(
+                    SheetTable(file.nameWithoutExtension, parseDelimited(file, if (ext == "tsv") '\t' else ','))
+                ),
                 meta = "表格"
             )
+            "rtf" -> rtfDocument(file)
             else -> throw java.io.IOException("这种格式需要其他应用打开")
         }
+    }
+
+    private fun headOf(file: File): ByteArray = runCatching {
+        file.inputStream().use { input ->
+            val b = ByteArray(8)
+            val n = input.read(b)
+            if (n <= 0) ByteArray(0) else b.copyOf(n)
+        }
+    }.getOrDefault(ByteArray(0))
+
+    /** zip 型文档：按内部条目名判断，比扩展名准 */
+    private fun zipDocument(file: File, ext: String): DocContent? = runCatching {
+        val names = ZipFile(file).use { zf -> zf.entries().asSequence().map { it.name }.toSet() }
+        when {
+            names.contains("word/document.xml") -> parseDocx(file)
+            names.contains("ppt/presentation.xml") || names.any { it.startsWith("ppt/slides/slide") } -> parsePptx(file)
+            names.contains("xl/workbook.xml") -> parseXlsx(file)
+            names.contains("content.xml") -> parseOdf(file, tables = ext == "ods" || ext == "et")
+            else -> null
+        }
+    }.getOrNull()
+
+    /** OLE 复合文档：看哪个流在，就按哪个解析 */
+    private fun oleDocument(file: File): DocContent? {
+        LegacyWord.extract(file).takeIf { it.isNotEmpty() }?.let { lines ->
+            return DocContent(
+                blocks = lines.mapIndexed { i, t -> DocBlock(if (i == 0) DocStyle.TITLE else DocStyle.PARAGRAPH, t) },
+                meta = "Word 97-2003 · ${lines.size} 段"
+            )
+        }
+        LegacyPpt.extract(file).takeIf { it.isNotEmpty() }?.let { lines ->
+            return DocContent(
+                blocks = lines.mapIndexed { i, t -> DocBlock(if (i == 0) DocStyle.TITLE else DocStyle.PARAGRAPH, t) },
+                meta = "PowerPoint 97-2003 · ${lines.size} 段"
+            )
+        }
+        LegacyExcel.extract(file).takeIf { it.isNotEmpty() }?.let { sheets ->
+            return DocContent(sheets = sheets, meta = "Excel 97-2003 · ${sheets.size} 个工作表")
+        }
+        return null
+    }
+
+    /** RTF：去掉控制字，只留正文 */
+    private fun rtfDocument(file: File): DocContent {
+        if (file.length() > 8L * 1024 * 1024) throw java.io.IOException("RTF 文件过大")
+        val raw = file.readText(Charsets.ISO_8859_1)
+        val body = StringBuilder()
+        var i = 0
+        var skip = 0
+        while (i < raw.length) {
+            val c = raw[i]
+            when {
+                c == '\\' && i + 1 < raw.length && raw[i + 1] == '\'' -> {
+                    // \'hh 十六进制转义
+                    if (i + 3 < raw.length) {
+                        val code = raw.substring(i + 2, i + 4).toIntOrNull(16)
+                        if (code != null) body.append(code.toChar())
+                        i += 4
+                        continue
+                    }
+                    i++
+                }
+                c == '\\' -> { i += 2 }
+                c == '{' -> { i++ }
+                c == '}' -> { i++ }
+                c == '\r' || c == '\n' -> { body.append('\n'); i++ }
+                else -> { body.append(c); i++ }
+            }
+        }
+        val text = body.toString()
+            .replace(Regex("""[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]"""), " ")
+        val lines = text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (lines.isEmpty()) throw java.io.IOException("RTF 里没有可显示的文字")
+        return DocContent(
+            blocks = lines.map { DocBlock(DocStyle.PARAGRAPH, it) },
+            meta = "RTF · ${lines.size} 段"
+        )
     }
 
     // ---------------- docx ----------------
@@ -149,18 +232,12 @@ object DocParser {
         val blocks = ArrayList<DocBlock>()
         slides.forEachIndexed { i, name ->
             val xml = readZipText(file, name) ?: return@forEachIndexed
-            var first = true
-            Regex("""<a:p>.*?</a:p>""", RegexOption.DOT_MATCHES_ALL).findAll(xml).forEach { p ->
-                val text = Regex("""<a:t>(.*?)</a:t>""", RegexOption.DOT_MATCHES_ALL)
+            val texts = Regex("""<a:p>.*?</a:p>""", RegexOption.DOT_MATCHES_ALL).findAll(xml).map { p ->
+                Regex("""<a:t>(.*?)</a:t>""", RegexOption.DOT_MATCHES_ALL)
                     .findAll(p.value).joinToString("") { unescape(it.groupValues[1]) }.trim()
-                if (text.isEmpty()) return@forEach
-                if (first) {
-                    blocks.add(DocBlock(DocStyle.HEADING, "第 ${i + 1} 页 · $text"))
-                    first = false
-                } else {
-                    blocks.add(DocBlock(DocStyle.PARAGRAPH, text))
-                }
-            }
+            }.filter { it.isNotEmpty() }.toList()
+            blocks.add(DocBlock(DocStyle.SLIDE, texts.firstOrNull().orEmpty(), i + 1))
+            texts.drop(1).forEach { blocks.add(DocBlock(DocStyle.PARAGRAPH, it, i + 1)) }
         }
         return DocContent(blocks = blocks, meta = "${slides.size} 页")
     }

@@ -163,16 +163,21 @@ fun FileTypeBadge(
     }
     val kind = FileKinds.kindOfName(file.name)
     // 图片与视频仍优先给首帧，缩略图拿不到时回落到主题图标
-    if (kind == FileKind.IMAGE || kind == FileKind.VIDEO) {
-        ThumbBadge(file, kind == FileKind.VIDEO, size, modifier)
+    if (kind == FileKind.IMAGE || kind == FileKind.VIDEO || kind == FileKind.AUDIO) {
+        ThumbBadge(file, kind, size, modifier)
         return
     }
     MaterialFileIcon(file.name, isDir = false, size = size, modifier = modifier)
 }
 
 @Composable
-private fun ThumbBadge(file: File, isVideo: Boolean, size: Dp, modifier: Modifier) {
-    val bmp = rememberThumb(file, isVideo)
+private fun ThumbBadge(file: File, kind: FileKind, size: Dp, modifier: Modifier) {
+    val thumbKind = when (kind) {
+        FileKind.VIDEO -> ThumbKind.VIDEO
+        FileKind.AUDIO -> ThumbKind.AUDIO
+        else -> ThumbKind.IMAGE
+    }
+    val bmp = rememberThumb(file, thumbKind)
     if (bmp == null) {
         MaterialFileIcon(file.name, isDir = false, size = size, modifier = modifier)
         return
@@ -189,7 +194,7 @@ private fun ThumbBadge(file: File, isVideo: Boolean, size: Dp, modifier: Modifie
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
-        if (isVideo) {
+        if (kind == FileKind.VIDEO) {
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)

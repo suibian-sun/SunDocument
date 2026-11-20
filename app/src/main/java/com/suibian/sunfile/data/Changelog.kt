@@ -17,6 +17,23 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.3.0",
+            date = "2026-11-20",
+            title = "PPT 内置预览、插件与免 Root 目录",
+            items = listOf(
+                "Office 文档改按文件内容识别：pptx / docx / xlsx 以及老式 ppt / doc / xls 都在应用内打开",
+                "PPT 按页排版，标题与正文分开显示；PDF 用内置阅读器渲染，不再跳第三方",
+                "压缩包内进入文件夹后，返回键先回上一级，到根目录才退出预览",
+                "新增插件体系：.mtp 包（manifest.json + 代码或脚本），动作出现在文件长按菜单",
+                "免 Root 浏览 Android/data 与 Android/obb：一次 SAF 授权即可长期访问",
+                "新增系统信息：内核、内存、存储、挂载点与各目录的可读性",
+                "十六进制对比可边看边改，差异字节直接标出",
+                "打开方式改为顶部标签分页，左右滑动切换",
+                "音频文件显示内嵌封面缩略图",
+                "设置页去掉多余说明文字，改用右侧箭头与状态值"
+            )
+        ),
+        ChangeEntry(
             version = "1.2.0",
             date = "2026-11-20",
             title = "图标、搜索与文档编辑",

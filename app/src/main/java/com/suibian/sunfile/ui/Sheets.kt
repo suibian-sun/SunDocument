@@ -1,5 +1,7 @@
 package com.suibian.sunfile.ui
 
+import kotlinx.coroutines.launch
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -73,6 +75,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -468,10 +471,8 @@ fun BookmarkSheet(
 }
 
 /**
- * 打开方式选择。
- *
- * 结构照 MT：居中直角卡片、三列彩色方块、底部左「类型」右「关闭」。
- * 方块比列表行更容易在拇指区一次点中，也把「这是什么」交给图标本身回答。
+ * 打开方式选择：顶部按用途分页，左右滑动或点标签切换。
+ * 方块只留图标与名称——用途由分组说明，不再逐格写解释。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -487,25 +488,31 @@ fun OpenWithSheet(
     var remember by remember { mutableStateOf(false) }
     val rawExt = FileKinds.extensionOf(file)
     val kind = FileKinds.kindOf(file)
-    val modes = buildList {
-        add(OpenMode.TEXT)
-        add(OpenMode.HEX)
+    val preview = buildList {
         when (kind) {
+            com.suibian.sunfile.data.FileKind.OFFICE -> add(OpenMode.DOCUMENT)
+            com.suibian.sunfile.data.FileKind.PDF -> add(OpenMode.PDF)
             com.suibian.sunfile.data.FileKind.IMAGE -> add(OpenMode.IMAGE)
             com.suibian.sunfile.data.FileKind.AUDIO -> add(OpenMode.AUDIO)
             com.suibian.sunfile.data.FileKind.VIDEO -> add(OpenMode.VIDEO)
-            com.suibian.sunfile.data.FileKind.OFFICE ->
-                if (FileKinds.isDocumentReadable(file)) add(OpenMode.DOCUMENT)
-            com.suibian.sunfile.data.FileKind.APK -> {
-                add(OpenMode.INFO)
-                add(OpenMode.AXML)
-                add(OpenMode.DEX)
-            }
             else -> Unit
         }
         if (FileKinds.isZipReadable(file)) add(OpenMode.ARCHIVE)
-        add(OpenMode.EXTERNAL)
+        if (kind == com.suibian.sunfile.data.FileKind.APK) {
+            add(OpenMode.INFO)
+            add(OpenMode.AXML)
+            add(OpenMode.DEX)
+        }
     }
+    val edit = listOf(OpenMode.TEXT, OpenMode.HEX)
+    val other = listOf(OpenMode.EXTERNAL)
+    val groups = buildList {
+        if (preview.isNotEmpty()) add("预览" to preview)
+        add("编辑" to edit)
+        add("其他" to other)
+    }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { groups.size })
+    val scope = rememberCoroutineScope()
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -519,17 +526,24 @@ fun OpenWithSheet(
                 .navigationBarsPadding()
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, top = 16.dp, end = 14.dp),
+                Modifier.fillMaxWidth().padding(start = 18.dp, top = 14.dp, end = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "打开方式…",
-                    color = SunColors.TextPrimary,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Normal,
-                    letterSpacing = 0.sp
-                )
-                Spacer(Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "打开方式",
+                        color = SunColors.TextPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        file.name + if (rawExt.isNotEmpty()) "  ·  .$rawExt" else "",
+                        color = SunColors.TextTertiary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Text(
                     "管理",
                     color = SunColors.Accent,
@@ -540,28 +554,43 @@ fun OpenWithSheet(
                         .padding(horizontal = 8.dp, vertical = 5.dp)
                 )
             }
-            Text(
-                file.name + if (remembered != null) "  ·  默认 ${remembered.label}" else "",
-                color = SunColors.TextTertiary,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 20.dp, top = 2.dp, end = 20.dp)
-            )
-            Spacer(Modifier.height(10.dp))
 
-            modes.chunked(3).forEach { line ->
-                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-                    line.forEach { mode ->
-                        OpenModeTile(
-                            mode = mode,
-                            isDefault = remembered == mode,
-                            modifier = Modifier.weight(1f),
-                            onClick = { if (remember) onPickAndRemember(mode) else onPick(mode) },
-                            onLongClick = { onSetDefault(mode) }
-                        )
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, bottom = 2.dp)) {
+                groups.forEachIndexed { i, group ->
+                    val active = pager.currentPage == i
+                    Text(
+                        group.first,
+                        color = if (active) SunColors.Accent else SunColors.TextSecondary,
+                        fontSize = 12.5.sp,
+                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                        modifier = Modifier
+                            .clip(SunShapes.Small)
+                            .clickable { scope.launch { pager.animateScrollToPage(i) } }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxWidth().height(190.dp)
+            ) { page ->
+                val modes = groups[page].second
+                Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
+                    modes.chunked(3).forEach { line ->
+                        Row(Modifier.fillMaxWidth()) {
+                            line.forEach { mode ->
+                                OpenModeTile(
+                                    mode = mode,
+                                    isDefault = remembered == mode,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { if (remember) onPickAndRemember(mode) else onPick(mode) },
+                                    onLongClick = { onSetDefault(mode) }
+                                )
+                            }
+                            repeat(3 - line.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
-                    repeat(3 - line.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
 
@@ -569,7 +598,7 @@ fun OpenWithSheet(
                 Modifier
                     .fillMaxWidth()
                     .clickable { remember = !remember }
-                    .padding(start = 16.dp, end = 20.dp, top = 4.dp, bottom = 2.dp),
+                    .padding(start = 14.dp, end = 18.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(
@@ -578,37 +607,24 @@ fun OpenWithSheet(
                     colors = CheckboxDefaults.colors(
                         checkedColor = SunColors.Accent,
                         uncheckedColor = SunColors.TextTertiary
-                    )
+                    ),
+                    modifier = Modifier.size(20.dp)
                 )
+                Spacer(Modifier.width(4.dp))
                 Text(
-                    if (rawExt.isEmpty()) "总是用此方式打开无扩展名文件" else "总是用此方式打开 .$rawExt",
+                    if (rawExt.isEmpty()) "记住这个选择" else "以后 .$rawExt 都用它",
                     color = SunColors.TextSecondary,
                     fontSize = 11.5.sp
-                )
-            }
-
-            Row(
-                Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "类型",
-                    color = SunColors.Accent,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier
-                        .clip(SunShapes.Small)
-                        .clickable { onManage() }
-                        .padding(horizontal = 2.dp, vertical = 6.dp)
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     "关闭",
-                    color = SunColors.Accent,
+                    color = SunColors.TextSecondary,
                     fontSize = 12.5.sp,
                     modifier = Modifier
                         .clip(SunShapes.Small)
                         .clickable { onDismiss() }
-                        .padding(horizontal = 2.dp, vertical = 6.dp)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
                 )
             }
         }
@@ -653,14 +669,9 @@ private fun OpenModeTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        Text(
-            if (isDefault) "默认" else modeHint(mode).substringBefore(" / "),
-            color = SunColors.TextTertiary,
-            fontSize = 8.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 2.dp)
-        )
+        if (isDefault) {
+            Text("默认", color = SunColors.Accent.copy(alpha = 0.8f), fontSize = 8.sp)
+        }
     }
 }
 
@@ -672,6 +683,7 @@ private fun modeColor(mode: OpenMode): Color = when (mode) {
     OpenMode.AUDIO -> Color(0xFFDE474E)
     OpenMode.VIDEO -> Color(0xFF7A5BD3)
     OpenMode.DOCUMENT -> Color(0xFF3B72C4)
+    OpenMode.PDF -> Color(0xFFC0503F)
     OpenMode.ARCHIVE -> Color(0xFF8B5E3C)
     OpenMode.AXML -> Color(0xFF2E8B8B)
     OpenMode.DEX -> Color(0xFF4F8F8A)
@@ -747,6 +759,7 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.AUDIO -> Icons.Outlined.MusicNote
     OpenMode.VIDEO -> Icons.Outlined.Movie
     OpenMode.DOCUMENT -> Icons.Outlined.Description
+    OpenMode.PDF -> Icons.Outlined.Description
     OpenMode.ARCHIVE -> Icons.Outlined.Archive
     OpenMode.AXML -> Icons.Outlined.Code
     OpenMode.DEX -> Icons.Outlined.DataObject
@@ -754,19 +767,6 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
 
-private fun modeHint(mode: OpenMode) = when (mode) {
-    OpenMode.TEXT -> "语法高亮、补全，可直接编辑保存"
-    OpenMode.HEX -> "按字节查看任意大小的文件"
-    OpenMode.IMAGE -> "内置缩放，可左右滑动切换"
-    OpenMode.AUDIO -> "底部小窗播放，可切上一首下一首"
-    OpenMode.VIDEO -> "全屏播放，左右滑动切换"
-    OpenMode.DOCUMENT -> "直接读取 Word / Excel / PPT 内容"
-    OpenMode.ARCHIVE -> "浏览 zip / tar 内部文件并解压"
-    OpenMode.AXML -> "把二进制 XML 还原成可读文本"
-    OpenMode.DEX -> "查看类、方法、字段与字符串"
-    OpenMode.INFO -> "包名、签名、权限、组件一览"
-    OpenMode.EXTERNAL -> "交给系统中已安装的应用"
-}
 
 // ---------------- 输入与提示 ----------------
 
