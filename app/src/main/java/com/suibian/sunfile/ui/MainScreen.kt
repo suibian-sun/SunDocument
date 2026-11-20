@@ -186,6 +186,7 @@ sealed interface Page {
     data object Plugins : Page
     data object Mcp : Page
     data object Inspect : Page
+    data object MtPlugins : Page
 }
 
 /** 内置全屏查看器 */
@@ -200,6 +201,7 @@ private sealed interface Viewer {
     data class Compare(val left: File, val right: File) : Viewer
     data class Reverse(val file: File, val tab: Int = 0) : Viewer
     data class Arsc(val source: ArscSource) : Viewer
+    data class AxmlEdit(val file: File, val entry: String = "AndroidManifest.xml") : Viewer
     data class NinePatch(val file: File) : Viewer
     data class Web(val file: File) : Viewer
 }
@@ -278,7 +280,7 @@ fun MainScreen(
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(enabled = drawerState.isClosed && page != Page.Files) {
         page = when (page) {
-            Page.Changelog, Page.Plugins, Page.Trash, Page.Mcp, Page.Inspect -> Page.Settings
+            Page.Changelog, Page.Plugins, Page.Trash, Page.Mcp, Page.Inspect, Page.MtPlugins -> Page.Settings
             else -> Page.Files
         }
     }
@@ -341,6 +343,7 @@ fun MainScreen(
                 else ArscSource(file)
             )
             OpenMode.NINEPATCH -> viewer = Viewer.NinePatch(file)
+            OpenMode.AXML_EDIT -> viewer = Viewer.AxmlEdit(file)
             OpenMode.EXTERNAL -> if (!openExternally(context, file)) openFailure = file
         }
     }
@@ -586,6 +589,8 @@ fun MainScreen(
 
                     Page.Inspect -> InspectPage(onBack = { page = Page.Settings })
 
+                    Page.MtPlugins -> MtPluginPage(onBack = { page = Page.Settings })
+
                     Page.Trash -> {
                         val items = remember(trashTick) { vm.trashItems() }
                         TrashPage(
@@ -631,7 +636,8 @@ fun MainScreen(
                         onHtmlMode = { vm.prefsStore.setHtmlMode(it) },
                         onPlugins = { page = Page.Plugins },
                         onMcp = { page = Page.Mcp },
-                        onInspect = { page = Page.Inspect }
+                        onInspect = { page = Page.Inspect },
+                        onMtPlugins = { page = Page.MtPlugins }
                     )
                 }
             }
@@ -1207,6 +1213,7 @@ fun MainScreen(
         )
         is Viewer.Arsc -> ArscOverlay(v.source) { closeViewer() }
         is Viewer.NinePatch -> NinePatchOverlay(v.file) { closeViewer() }
+        is Viewer.AxmlEdit -> AxmlEditorOverlay(v.file, v.entry) { closeViewer() }
         is Viewer.Web -> WebPreviewOverlay(v.file) { closeViewer() }
         is Viewer.Image -> ImageViewerOverlay(v.file, v.playlist) { closeViewer() }
         is Viewer.Audio -> AudioSheetOverlay(v.file, v.playlist) { closeViewer() }

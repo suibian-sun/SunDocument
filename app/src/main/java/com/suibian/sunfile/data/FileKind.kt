@@ -18,6 +18,7 @@ enum class OpenMode(val label: String) {
     DEX("Dex 结构浏览"),
     INFO("安装包信息"),
     ARSC("资源表编辑"),
+    AXML_EDIT("清单编辑"),
     NINEPATCH("点九图编辑"),
     EXTERNAL("用其他应用打开")
 }
@@ -130,6 +131,7 @@ object FileKinds {
         // 点九图与资源表有自己的编辑器，别落到普通图片查看器 / 十六进制里
         if (name.endsWith(".9.png")) return OpenMode.NINEPATCH
         if (name.endsWith(".arsc")) return OpenMode.ARSC
+        if (name.endsWith(".apk") || name.endsWith(".apks")) return null
         return when (kindOf(file)) {
         FileKind.DIR -> null
         FileKind.TEXT -> OpenMode.TEXT

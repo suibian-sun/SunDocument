@@ -503,6 +503,7 @@ fun OpenWithSheet(
         if (kind == com.suibian.sunfile.data.FileKind.APK) {
             add(OpenMode.INFO)
             add(OpenMode.AXML)
+            add(OpenMode.AXML_EDIT)
             add(OpenMode.DEX)
             add(OpenMode.ARSC)
         }
@@ -693,6 +694,7 @@ private fun modeColor(mode: OpenMode): Color = when (mode) {
     OpenMode.INFO -> Color(0xFF3FA45B)
     OpenMode.ARSC -> Color(0xFF7C6BD6)
     OpenMode.NINEPATCH -> Color(0xFF2F9E75)
+    OpenMode.AXML_EDIT -> Color(0xFFB07A3A)
     OpenMode.EXTERNAL -> Color(0xFF566573)
 }
 
@@ -771,6 +773,7 @@ private fun modeIcon(mode: OpenMode) = when (mode) {
     OpenMode.INFO -> Icons.Outlined.Android
     OpenMode.ARSC -> Icons.Outlined.DataObject
     OpenMode.NINEPATCH -> Icons.Outlined.Image
+    OpenMode.AXML_EDIT -> Icons.Outlined.DriveFileRenameOutline
     OpenMode.EXTERNAL -> Icons.Outlined.OpenInNew
 }
 

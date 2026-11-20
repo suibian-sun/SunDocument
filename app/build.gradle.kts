@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.4.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 20
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.5.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 21
 
 android {
     namespace = "com.suibian.sunfile"
@@ -105,6 +105,8 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // 免 Root 访问 Android/data：SAF 目录
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // 给改过的 APK 重签名（v1 + v2 + v3）
+    implementation("com.android.tools.build:apksig:8.5.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

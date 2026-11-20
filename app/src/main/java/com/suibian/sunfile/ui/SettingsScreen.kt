@@ -79,7 +79,8 @@ fun SettingsPage(
     onHtmlMode: (String) -> Unit = {},
     onPlugins: () -> Unit = {},
     onMcp: () -> Unit = {},
-    onInspect: () -> Unit = {}
+    onInspect: () -> Unit = {},
+    onMtPlugins: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -118,6 +119,7 @@ fun SettingsPage(
             ValueRow("历史更新", "", onChangelog)
             ValueRow("回收站", "", onTrash)
             ValueRow("插件", "", onPlugins)
+            ValueRow("MT 插件", "", onMtPlugins)
 
             SectionTitle("开发者")
             ValueRow("界面分析", "", onInspect)

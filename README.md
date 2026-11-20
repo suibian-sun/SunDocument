@@ -130,39 +130,36 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 
 可选字段：`blockStart` / `blockEnd` 定义块注释。命中扩展名后，编辑器的高亮与补全关键字都走这份规则。
 
-## 插件
+## MT 插件
 
-插件包后缀 `.mtp`，本质是 zip，与 MT 的结构一致：
+MT 的插件包（`.mtp`）里放的是 **Java 源码**，MT 自己编译执行。这里没有编译器，
+所以换了一条路：把源码解析成语法树，用内置的解释器跑，同时把 `bin.mt.plugin.api`
+用宿主实现顶上。**MT 插件不用改一行代码，装上就能用。**
 
 ```
-manifest.json      必填，声明 id / 名称 / 版本 / actions
-classes.dex        可选，插件代码（也可放 libs/*.jar）
-assets/            可选，资源
+manifest.json      必填，pluginSdkVersion / pluginID / versionCode / name / interfaces / mainPreference
+src/*.java         插件源码，可以带 package 与多级目录
+assets/*.mtl       语言包，String.mtl / String-zh-CN.mtl
+assets/            其它资源，context.getAssetsAsStream("d/a.txt") 读
 icon.png           可选，图标
+libs/*.jar         第三方库（见限制）
 ```
 
-`manifest.json` 允许注释与裸键，和 MT 一样：
+已实现的 API：
 
-```json
-{
-  pluginSdkVersion: 2,
-  pluginID: "cc.sun.demo",
-  versionCode: 1,
-  versionName: "1.0",
-  name: "示例插件",
-  description: "算个 MD5",
-  interfaces: [],
-  actions: [
-    { id: "md5", label: "计算 MD5", script: "md5sum ${files}", extensions: ["*"] }
-  ]
-}
-```
+| 范围 | 内容 |
+| --- | --- |
+| `MTPluginContext` | 插件 id / 版本、`getPreferences()`、语言环境、`getFilesDir()`、`getLocalString()`、`getAssetLocalString()`、`getLanguageNameLocalString()`、`getAssetsAsStream()`、`log()`、`showToast()` |
+| `LocalString` | `.mtl` 语言包解析、`get(key)`、`get(key, lang)`、`getOrDefault`、`keySet`、清单里的 `{key}` 本地化 |
+| `PluginPreference` | Builder 的 Header / Text / Input / Switch / List，按声明渲染成真正的设置界面，值读写 SharedPreferences |
+| `TranslationEngine` / `BaseTranslationEngine` | 名称、源/目标语言、`translate()`，以及 `Configuration` / `ConfigurationBuilder` |
+| 语言 | Java 类、继承、字段、构造器、if/for/foreach/while/do/switch/try、字符串与正则、List/Map/File/JSON、`String.format`、`Math`、`Arrays` 等 JDK 调用 |
 
-两种动作：`script` 走 shell（`${files}` 会替换成选中路径）；`class` 指向 dex 里的类，
-宿主按 `run(Context, List<File>): String?` 反射调用，也兼容 `run(Context, String[])` 与 `run()`。
-装上后动作出现在文件长按菜单，输出在对话框里显示，可一键复制。
+安装：设置 → MT 插件 → 右上角加号选 `.mtp`；空列表里还能一键装一个示例插件。
+装上后详情页能看设置界面、跑一次翻译、看插件日志。
 
-安装入口：设置 → 插件 → 安装；空列表时可以直接装一个示例插件试手感。
+原来的「脚本动作」插件（`manifest.json` 里写 `actions`，用 shell 或 dex 类实现）
+仍然支持，入口在设置 → 插件。
 
 ## 资源表与点九图
 
@@ -176,6 +173,18 @@ icon.png           可选，图标
 **点九图**：`npTc` 块保存拉伸区，四边各 1 像素保存拉伸与留白标记。
 编辑器把 1 像素的边放大成 20dp 宽的格子，点格子切换黑点，
 右下留白与整条拉伸有快捷按钮，保存时重新编码 PNG 并在 IHDR 后写回 `npTc`。
+
+## 清单编辑与重签名
+
+APK 的 `AndroidManifest.xml` 是二进制 AXML，普通的文本编辑器打不开。打开方式里选
+**清单编辑**：解成文本 → 改 → 保存时编译回 AXML 写进包里（属性名会查 `android.R.attr`
+表写 resource map，自定义属性保留名字但没有 id，系统按名找不到就忽略）。
+
+改过清单或 `resources.arsc` 的包签名一定失效，装不上。页面上的 **重签名** 会用运行时
+生成的密钥重新签（v1 + v2 + v3），在同目录产出 `xxx-signed.apk`，可以直接安装。
+密钥第一次用时生成并存在 `files/transpile`，之后复用，所以同一个包多次重签签名一致。
+
+对 MT 插件来说这一步不需要：`.mtp` 是 zip 源码包，本身没有签名，装进去就能跑。
 
 ## MCP 服务
 
@@ -275,7 +284,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.4.0 -PappVersionCode=20
+./gradlew assembleRelease -PappVersionName=1.5.0 -PappVersionCode=21
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -286,7 +295,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.4.0 && git push origin v1.4.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.5.0 && git push origin v1.5.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -307,10 +316,12 @@ export ANDROID_HOME=/path/to/android-sdk
 - 超过 12 万字的文本自动关闭整篇着色与补全（整段重排已经很重，优先保证输入流畅）；打开超过 32 MB 的文件会提示改用十六进制编辑器。
 - 分段载入的超长文件暂不支持撤销 / 重做，避免与未载入的尾部错位。
 - 十六进制编辑器单次最多载入 6 MB；更大的文件只读浏览，保存按钮会隐藏，避免只写回前半段。
-- **逆向部分做到「看 + 改资源」**：AndroidManifest 反编译、dex 浏览、签名与组件信息、资源表读写；
-  Smali 编辑、AXML 回编译、APK 重签名仍需要完整工具链，不在本应用范围内。改过 APK 内的资源后，安装前必须重新签名。
-- **插件只实现了宿主侧约定**：`.mtp` 的 manifest、脚本动作与 `run(Context, List<File>)` 反射调用是自己定的，
-  与 MT 官方 `bin.mt.plugin.api` 的类与方法签名并不完全一致，MT 插件不能直接拿来装。
+- **逆向做到「看 + 改资源 + 改清单 + 重签」**：AndroidManifest 反编译、dex 浏览、签名与组件信息、
+  资源表读写、AXML 回编译、v1+v2+v3 重签名。**Smali 编辑仍然没有**——反汇编与回汇编需要完整的
+  baksmali / smali 工具链，不是这一版能塞进来的东西，dex 侧目前只到类 / 方法 / 字段 / 字符串浏览。
+- **MT 插件走解释执行**：插件源码由内置解释器跑，JDK 与 Android 常用类通过反射调用。
+  依赖 `libs/*.jar` 的插件跑不了（Android 上没法执行 jar 里的 JVM 字节码），
+  用到解释器没覆盖的语法或类时会明确报错，不会静默失败。
 - 最低支持 Android 8.0（API 26）：7z / xz 解码依赖 `java.nio.file`，低版本无法保证稳定。
 - 编辑器暂不支持多文件标签页（MT 的「保留文件」），关闭时会提示保存；终端直接调用系统 `sh`，没有内置 bash / coreutils 扩展包，`ls -l` 等行为以系统自带实现为准。
 
@@ -318,6 +329,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.5.0 | MT 插件直装直用（Java 源码解释器 + `bin.mt.plugin.api` 宿主实现，翻译引擎 / 设置界面 / 本地化文本）；清单编辑（AXML 回编译并写回 APK）；APK 重签名（v1+v2+v3，运行时自签证书） |
 | 1.4.0 | 资源表编辑器（读类型/条目/限定符，改字符串与整数并写回 APK）；点九图编辑器（补丁线可视化、保存回 .9.png）；MCP 服务（本机 JSON-RPC，9 个文件工具）；界面分析（无障碍控件树，可导出）；设置新增「开发者」分组 |
 | 1.3.0 | Office 按内容识别（含老式 ppt/doc/xls）；PPT 分页排版；PDF 内置阅读器；压缩包返回先回上级；.mtp 插件体系；免 Root 浏览 Android/data 与 obb；系统信息页；HEX 对比可改字节；打开方式分页；音频封面；设置页精简 |
 | 1.2.0 | material-icon-theme 图标（1100+ 格式）；黑白配色对齐 MT；MT 式搜索面板（通配符/正则/大小/时间/内容/历史）；回收站（30 天）；PPT 内置预览（含 .ppt）；docx/pptx/xlsx 编辑；语法插件与命令面板；图标缩略图异步化；tar 分卷；图片 EXIF；网页/MD 打开方式 |

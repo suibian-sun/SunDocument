@@ -17,6 +17,19 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.5.0",
+            date = "2026-11-20",
+            title = "MT 插件直装直用",
+            items = listOf(
+                "MT 插件（.mtp）直接安装：插件里是 Java 源码，这一版自带解释器，解析成语法树直接执行，不用改一行代码",
+                "补齐 bin.mt.plugin.api：插件上下文、本地化文本（.mtl 语言包）、设置界面（Header / Text / Input / Switch / List）、翻译引擎与 Configuration",
+                "插件详情页能渲染设置界面、跑一次翻译、看日志；空列表可一键装示例插件",
+                "清单编辑：AndroidManifest 解成文本改完再编译回 AXML 写进 APK",
+                "APK 重签名：运行时生成密钥，v1 + v2 + v3，产物可直接安装；密钥复用，多次重签签名一致",
+                "打开方式新增「清单编辑」，APK 默认改为让用户选"
+            )
+        ),
+        ChangeEntry(
             version = "1.4.0",
             date = "2026-11-20",
             title = "资源表、点九图与 MCP 服务",
