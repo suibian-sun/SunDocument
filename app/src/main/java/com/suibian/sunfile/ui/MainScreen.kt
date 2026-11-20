@@ -548,12 +548,17 @@ fun MainScreen(
                         onOpen = { f -> openFromList(f, Offset.Zero) },
                         onExport = { node ->
                             val dest = panes[active].currentDir
-                            val out = com.suibian.sunfile.data.SafRepo.copyTo(context, node, dest)
-                            Toast.makeText(
-                                context,
-                                if (out != null) "已导出到 ${dest.name}" else "导出失败",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            scope.launch {
+                                val out = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.suibian.sunfile.data.SafRepo.copyTo(context, node, dest)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (out != null) "已导出到 ${dest.name}" else "导出失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                vm.refreshAll()
+                            }
                         }
                     )
 
