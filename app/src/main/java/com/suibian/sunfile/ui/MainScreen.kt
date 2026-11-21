@@ -198,6 +198,7 @@ sealed interface Page {
     data object MtPlugins : Page
     data object Apps : Page
     data object Remote : Page
+    data object Network : Page
     data object Signing : Page
     data object SmaliRef : Page
     data object Passwords : Page
@@ -287,7 +288,10 @@ fun MainScreen(
     var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
     var searchOpen by remember { mutableStateOf(false) }
     var storeDialog by remember { mutableStateOf<StorageDialog?>(null) }
-    var networkTarget by remember { mutableStateOf<NetworkMount?>(null) }
+    var networkMount by remember { mutableStateOf<NetworkMount?>(null) }
+    var installTarget by remember { mutableStateOf<File?>(null) }
+    var installBusy by remember { mutableStateOf(false) }
+    val installProgress = remember { kotlinx.coroutines.flow.MutableStateFlow(-1f) }
     var toolPicker by remember { mutableStateOf(false) }
 
     // 本地存储不再手输路径，直接跳系统目录选择器，拿 SAF 授权
@@ -549,7 +553,8 @@ fun MainScreen(
                         scope.launch { drawerState.close() }
                     },
                     onOpenNetwork = { net ->
-                        networkTarget = net
+                        networkMount = net
+                        page = Page.Network
                         scope.launch { drawerState.close() }
                     },
                     onRemoveLocal = { StorageBook.removeLocal(it) },
@@ -643,7 +648,8 @@ fun MainScreen(
                         onChecksum = {
                             pane.selected.singleOrNull()?.let { dialog = DialogKind.Checksum(File(it)) }
                         },
-                        onBookmarks = { sheet = SheetKind.Bookmarks },
+                        onBookmarks = { side -> sheet = SheetKind.Bookmarks(side) },
+                        bookmarkSplit = prefs.bookmarkSwipeSplit,
                         onApkInfo = {
                             pane.selected.singleOrNull()?.let { sheet = SheetKind.Apk(File(it)) }
                         },
@@ -726,6 +732,19 @@ fun MainScreen(
                     Page.Apps -> AppsPage(onBack = { page = Page.Files })
 
                     Page.Remote -> RemotePage(onBack = { page = Page.Files }, defaultRoot = pane.path)
+
+                    Page.Network -> {
+                        val nm = networkMount
+                        if (nm == null) {
+                            page = Page.Files
+                        } else {
+                            RemoteBrowserPage(
+                                mount = nm,
+                                onBack = { page = Page.Files },
+                                onOpenLocalPath = { p -> vm.navigate(p); page = Page.Files }
+                            )
+                        }
+                    }
 
                     Page.Signing -> SigningPage(onBack = { page = Page.Files })
 
@@ -904,8 +923,12 @@ fun MainScreen(
                 }
                 if (isApk) {
                     add(EntryAction(Icons.Outlined.Android, "安装") {
-                        if (!installApk(context, target)) {
-                            Toast.makeText(context, "无法启动安装程序", Toast.LENGTH_SHORT).show()
+                        sheet = null
+                        if (prefs.confirmInstall) {
+                            installTarget = target
+                        } else {
+                            installBusy = true
+                            scope.launch { runInstall(context, target, prefs, installProgress) { installBusy = false } }
                         }
                     })
                     add(EntryAction(Icons.Outlined.Info, "安装包信息") {
@@ -1020,8 +1043,11 @@ fun MainScreen(
             onDelete = { sheet = null; dialog = DialogKind.Delete(listOf(s.entry.path)) },
             onInstall = {
                 sheet = null
-                if (!installApk(context, s.entry.file)) {
-                    Toast.makeText(context, "无法启动安装程序", Toast.LENGTH_SHORT).show()
+                if (prefs.confirmInstall) {
+                    installTarget = s.entry.file
+                } else {
+                    installBusy = true
+                    scope.launch { runInstall(context, s.entry.file, prefs, installProgress) { installBusy = false } }
                 }
             },
             onOpenAsText = { sheet = null; openWith(s.entry.file, OpenMode.TEXT) }
@@ -1036,9 +1062,14 @@ fun MainScreen(
 
         is SheetKind.Bookmarks -> BookmarkSheet(
             bookmarks = prefs.bookmarks,
-            current = pane.path,
+            current = panes.getOrNull(s.side)?.path ?: pane.path,
             onDismiss = { sheet = null },
-            onGo = { path -> sheet = null; vm.navigate(path) },
+            onGo = { path ->
+                sheet = null
+                val side = s.side.coerceIn(0, 1)
+                vm.open(side, path)
+                vm.setActive(side)
+            },
             onRemove = { path -> vm.prefsStore.removeBookmark(path) }
         )
 
@@ -1357,77 +1388,118 @@ fun MainScreen(
         )
     }
 
-    // 网络存储：只有名称和链接，点开就是链接本身
-    networkTarget?.let { net ->
+    // 安装：先解析包信息让用户确认，再按设置里的四路开关选通道
+    installTarget?.let { apk ->
+        val meta = remember(apk.absolutePath) { com.suibian.sunfile.data.ApkInstaller.meta(context, apk) }
+        val check = remember(apk.absolutePath) { com.suibian.sunfile.data.ApkInstaller.verify(context, apk) }
+        val channels = remember(
+            apk.absolutePath,
+            prefs.installViaShizuku,
+            prefs.installViaRoot,
+            prefs.installViaDhizuku,
+            prefs.installPriority
+        ) { com.suibian.sunfile.data.ApkInstaller.plan(prefs, context) }
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { networkTarget = null },
+            onDismissRequest = { installTarget = null },
             containerColor = SunColors.Surface2,
             shape = SunShapes.Medium,
-            title = { Text(net.name, color = SunColors.TextPrimary, fontSize = 15.sp) },
+            title = {
+                Text(
+                    meta?.label ?: apk.name,
+                    color = SunColors.TextPrimary,
+                    fontSize = 15.sp,
+                    maxLines = 1
+                )
+            },
             text = {
                 Column {
-                    Text(
-                        net.uri,
-                        color = SunColors.Accent,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text("分组：${net.group}", color = SunColors.TextTertiary, fontSize = 10.sp)
+                    if (check != null) {
+                        Text(check, color = SunColors.Danger, fontSize = 11.5.sp, lineHeight = 17.sp)
+                    } else {
+                        Text(
+                            meta?.packageName ?: apk.name,
+                            color = SunColors.TextSecondary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            "版本 ${meta?.versionName ?: "?"}（${meta?.versionCode ?: 0}）· ${
+                                android.text.format.Formatter.formatShortFileSize(context, apk.length())
+                            }",
+                            color = SunColors.TextTertiary,
+                            fontSize = 10.5.sp
+                        )
+                        Spacer(Modifier.height(9.dp))
+                        Text(
+                            "通道 " + channels.joinToString(" → ") { it.label },
+                            color = SunColors.Accent,
+                            fontSize = 10.5.sp
+                        )
+                        if (channels.size == 1) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Shizuku / Root 未就绪，将交给系统安装器确认。",
+                                color = SunColors.TextTertiary,
+                                fontSize = 9.5.sp
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Row {
-                    Text(
-                        "打开",
-                        color = SunColors.Accent,
-                        fontSize = 12.5.sp,
-                        modifier = Modifier
-                            .clip(SunShapes.Small)
-                            .clickable {
-                                val uri = net.uri
-                                val ok = runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(normalizeLink(uri)))
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }.isSuccess
-                                Toast.makeText(
-                                    context,
-                                    if (ok) "已交给系统打开" else "没有能打开该链接的应用",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                networkTarget = null
+                Text(
+                    "安装",
+                    color = if (check != null) SunColors.TextTertiary else SunColors.Accent,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable(enabled = check == null) {
+                            installTarget = null
+                            installBusy = true
+                            scope.launch {
+                                runInstall(context, apk, prefs, installProgress) { installBusy = false }
                             }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                    Text(
-                        "复制",
-                        color = SunColors.Accent,
-                        fontSize = 12.5.sp,
-                        modifier = Modifier
-                            .clip(SunShapes.Small)
-                            .clickable {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("network", net.uri))
-                                Toast.makeText(context, "链接已复制", Toast.LENGTH_SHORT).show()
-                                networkTarget = null
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
             },
             dismissButton = {
                 Text(
-                    "关闭",
+                    "取消",
                     color = SunColors.TextSecondary,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.sp,
                     modifier = Modifier
                         .clip(SunShapes.Small)
-                        .clickable { networkTarget = null }
+                        .clickable { installTarget = null }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
+        )
+    }
+
+    if (installBusy) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            containerColor = SunColors.Surface2,
+            shape = SunShapes.Medium,
+            title = { Text("正在安装", color = SunColors.TextPrimary, fontSize = 15.sp) },
+            text = {
+                Column {
+                    Text("正在把安装包交给目标通道…", color = SunColors.TextSecondary, fontSize = 11.5.sp)
+                    Spacer(Modifier.height(10.dp))
+                    val p by installProgress.collectAsStateWithLifecycle()
+                    if (p >= 0f) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { p },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {}
         )
     }
 
@@ -1670,7 +1742,8 @@ private fun FilesPage(
     onCompressSelection: () -> Unit,
     onBatchRename: () -> Unit,
     onChecksum: () -> Unit,
-    onBookmarks: () -> Unit,
+    onBookmarks: (Int) -> Unit,
+    bookmarkSplit: Boolean,
     onApkInfo: () -> Unit,
     onChmod: () -> Unit,
     onShareSelection: () -> Unit,
@@ -1710,6 +1783,7 @@ private fun FilesPage(
             onBatchRename = onBatchRename,
             onChecksum = onChecksum,
             onBookmarks = onBookmarks,
+            activeIndex = active,
             onApkInfo = onApkInfo,
             onChmod = onChmod,
             onToggleBookmark = onToggleBookmark
@@ -1822,6 +1896,8 @@ private fun FilesPage(
             onGoto = onGoto,
             onFilter = onFilter,
             onSwipeUp = onBookmarks,
+            splitSwipe = bookmarkSplit,
+            activeIndex = active,
             onCopy = onSelectionCopy,
             onCut = onSelectionCut,
             onDelete = onSelectionDelete,
@@ -1868,7 +1944,8 @@ private fun TopBar(
     onCompress: () -> Unit,
     onBatchRename: () -> Unit,
     onChecksum: () -> Unit,
-    onBookmarks: () -> Unit,
+    onBookmarks: (Int) -> Unit,
+    activeIndex: Int,
     onApkInfo: () -> Unit,
     onChmod: () -> Unit,
     onToggleBookmark: (String) -> Unit
@@ -1983,7 +2060,7 @@ private fun TopBar(
                     onOverflowChange(false); onToggleBookmark(pane.path)
                 }
                 ToolMenuItem(Icons.Outlined.BookmarkBorder, "收藏夹", null) {
-                    onOverflowChange(false); onBookmarks()
+                    onOverflowChange(false); onBookmarks(activeIndex)
                 }
                 if (pane.selected.size == 1) {
                     val only = pane.selected.firstOrNull()?.let { File(it) }
@@ -2567,7 +2644,9 @@ private fun BottomBar(
     onUp: () -> Unit,
     onGoto: () -> Unit,
     onFilter: () -> Unit,
-    onSwipeUp: () -> Unit,
+    onSwipeUp: (Int) -> Unit,
+    splitSwipe: Boolean,
+    activeIndex: Int,
     onCopy: () -> Unit,
     onCut: () -> Unit,
     onDelete: () -> Unit,
@@ -2603,7 +2682,8 @@ private fun BottomBar(
             .pointerInput(Unit) {
                 val threshold = 22.dp.toPx()
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val startX = down.position.x
                     var dy = 0f
                     var fired = false
                     while (true) {
@@ -2613,7 +2693,13 @@ private fun BottomBar(
                         dy += c.positionChange().y
                         if (!fired && dy < -threshold) {
                             fired = true
-                            onSwipeUp()
+                            // 关闭「分左右」时永远打开当前栏；打开后按上滑起点落在哪半屏决定
+                            val side = if (splitSwipe) {
+                                if (startX < size.width / 2f) 0 else 1
+                            } else {
+                                activeIndex
+                            }
+                            onSwipeUp(side)
                         }
                     }
                 }
@@ -2872,4 +2958,33 @@ internal fun shareFile(context: Context, file: File): Boolean {
         context.startActivity(Intent.createChooser(intent, "分享 ${file.name}"))
         true
     }.getOrDefault(false)
+}
+
+/** 统一的安装执行与结果提示。放在 Composable 外，避免每次重组都新建闭包。 */
+private suspend fun runInstall(
+    context: Context,
+    apk: File,
+    prefs: com.suibian.sunfile.data.AppPrefs,
+    progress: kotlinx.coroutines.flow.MutableStateFlow<Float>,
+    onDone: () -> Unit
+) {
+    val outcome = runCatching {
+        com.suibian.sunfile.data.ApkInstaller.install(context, apk, prefs, progress)
+    }.getOrElse {
+        com.suibian.sunfile.data.ApkInstaller.Outcome.Failed(
+            com.suibian.sunfile.data.ApkInstaller.Channel.SYSTEM,
+            it.message ?: "安装失败"
+        )
+    }
+    progress.value = -1f
+    onDone()
+    val msg = when (outcome) {
+        is com.suibian.sunfile.data.ApkInstaller.Outcome.Installed ->
+            "${outcome.channel.label} 安装完成"
+        is com.suibian.sunfile.data.ApkInstaller.Outcome.Launched ->
+            "已交给系统安装器确认"
+        is com.suibian.sunfile.data.ApkInstaller.Outcome.Failed ->
+            "${outcome.channel.label}：${outcome.message}"
+    }
+    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
 }

@@ -78,13 +78,27 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 | 解压 | 解压全部或解压到当前目录，带路径穿越防护；zip / 7z / rar / tar 族 / gz / bz2 / xz 均可 |
 | 压缩包内编辑 | 长按条目可 **重命名（改完整路径即移动）/ 删除**；顶栏「＋」把当前栏选中的文件加入包内；点开文件编辑并保存后**自动写回 zip** |
 | 对比 | 选中两个文件后 ⋯ → 对比：文本逐行着色 diff，文件夹 / 压缩包输出清单报告（仅一侧、大小不同、类型不同） |
-| 终端 | 侧边栏「终端」：`/system/bin/sh`，可一键申请 **su** 后以 root 执行，`cd` 能进入 `/data` 等受限目录；↑↓ 翻命令历史，`clear` / `help` 可用 |
+| 终端 | 侧边栏「终端」：内置 **VT100/xterm 模拟器**（网格缓冲、光标定位、256 色、备用屏、5000 行回滚），扩展键行含 ESC/CTRL/ALT/TAB/方向键/PgUp/PgDn；默认以**本地身份**跑 `/system/bin/sh`，不需要任何授权就能 `ls /`、`cd /system`、`cat /system/build.prop`；需要 `/data` 时再一键升级到 Shizuku / Root |
 | 校验和 | SHA-256 + MD5，一键复制 |
 | 属性 | 路径、类型、递归大小（0.01 精度）、子项数、修改时间、权限、zip 条目数 |
 | 权限 | 选中单项可 `chmod`（000–7777），系统目录配合 Root |
 | 收藏夹 / 最近访问 | 侧边栏与 ⋮ 菜单快速跳转 |
 | 搜索 | **弹窗内**按名称或按内容搜索：内容模式给出「文件 + 行号 + 该行片段」，点击直接打开并定位到该行 |
 | 分享 / 复制路径 | FileProvider 分享，避免暴露 `file://` |
+
+### 网络存储
+
+侧边栏「网络存储」点开即进入内置浏览页，六种协议都有真实客户端，不依赖系统里装没装对应 App：
+
+| 协议 | 链接示例 | 说明 |
+| --- | --- | --- |
+| FTP / FTPS | `ftp://user:pass@host:21/path`、`ftps://…:990` | 被动模式；FTPS 支持显式（21）与隐式（990） |
+| SFTP | `sftp://user:pass@host:22/home` | SSH 密码认证，跳过首次 host key 确认 |
+| SMB | `smb://user:pass@host/share/sub` | SMB2/3；不写共享名时按常见共享名探测 |
+| WebDAV | `webdav://user:pass@host:5005/dav` | PROPFIND 列目录，PUT 上传，MKCOL 建目录，MOVE 改名 |
+| 对象存储 | `s3://AK:SK@minio.local:9000/bucket?region=us-east-1` | S3 兼容（AWS / MinIO / OSS 的 S3 模式），AWS SigV4 签名 |
+
+浏览页支持：列目录、进入子目录、上传（可多选）、下载到 `Download/SunDocument/<名称>/`、点击文件下载到缓存后交给对应应用打开、新建文件夹、重命名、删除、断线重连。缩略图受设置里「网络缩略图 / 仅 Wi-Fi / 单图上限 / 超时」四项共同控制。
 
 ### 过滤、跳转与书签
 
@@ -311,7 +325,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.8.0 -PappVersionCode=26
+./gradlew assembleRelease -PappVersionName=1.9.0 -PappVersionCode=27
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -322,7 +336,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.8.0 && git push origin v1.8.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.9.0 && git push origin v1.9.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -337,7 +351,9 @@ export ANDROID_HOME=/path/to/android-sdk
 
 ## 已知限制
 
-- `/data`、`/system` 受内核沙箱限制，**未 Root 时任何第三方应用都读不到**（MT 管理器同样依赖 Root），本应用提供一键 Root。`Android/data`、`Android/obb` 在 Android 13 起连 SAF 也逐步收紧，个别 ROM 会拒绝授权，这时只能靠 Root。
+- **`/`、`/system`、`/vendor`、`/product`、`/apex`、`/sdcard` 不需要 Root 或 Shizuku**：应用用自己的 uid 就能读，文件管理器与终端走同一条本地 shell 通道。**`/data` 及其子目录**（包括其他应用的私有目录）受内核 DAC 与 SELinux 限制，任何非 root 应用都读不到 —— Termux 非 root 模式同样如此，这不是本应用缺功能。需要时在设置里接入 Shizuku（shell 身份）或 Root。
+- `Android/data`、`Android/obb` 在 Android 13 起连 SAF 也逐步收紧，个别 ROM 会拒绝授权，这时只能靠 Root。
+- 远程协议以「能用」为准：SMB 不写共享名时只探测常见共享（smbj 不提供 NetShareEnum）；S3 上传使用 UNSIGNED-PAYLOAD，部分强制签名的私有部署需要改用支持预签名哈希的服务端配置。
 - 压缩包：zip / 7z / rar / tar / tar.gz / tar.bz2 / tar.xz / gz / bz2 / xz 均可浏览与解压；创建支持 zip / 7z / tar / tar.gz，其中 **AES-256 密码仅 ZIP**（7z 写入侧加密库不完整，暂不提供）。RAR5 的个别压缩算法可能解不出，会明确提示。
 - 老式 doc / xls / ppt 走二进制抽样（Word 的 piece table、Excel 的 BIFF8、PPT 的 TextCharsAtom），只保证文字与表格能读出来，样式与图片不还原。
 - 超过 12 万字的文本自动关闭整篇着色与补全（整段重排已经很重，优先保证输入流畅）；打开超过 32 MB 的文件会提示改用十六进制编辑器。
@@ -357,6 +373,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.9.0 | 六种网络协议内置客户端（FTP/FTPS/SFTP/SMB/WebDAV/S3）与远程浏览页；终端重写为 VT100/xterm 模拟器；新增「本地」shell 引擎，无需授权即可读根目录与系统分区；安装四通道接线；书签上滑分左右 |
 | 1.8.0 | 去分割线改用层级与光影；侧边栏同顶栏配色、三区块可折叠；本地存储走系统目录选择器，网络存储支持六种协议；设置页重写为九分类并全部接线；插件入口合并 |
 | 1.7.1 | 接入 Shizuku 引擎：文件操作代理给 shell 进程执行，可读根目录、/system、/vendor；Shizuku / Root / 普通 API 三条通道自动选路 |
 | 1.7.0 | 侧边栏重做（顶部导航 + 本地存储容量条 + 网络存储分组 + 工具区）；九件新工具：已安装应用、远程管理、签名密钥、Smali 指令、常用密码、音乐播放器、流媒体、远程 Payload、屏幕取色；搜索历史七条下拉 + 我的收藏；页面底色 #303030 / #FAFAFA，顶栏 #151515 / #303030，双栏 2dp 高对比分割线 |

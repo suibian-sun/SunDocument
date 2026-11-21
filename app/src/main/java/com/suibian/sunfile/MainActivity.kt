@@ -48,6 +48,12 @@ class MainActivity : ComponentActivity() {
             runCatching { com.suibian.sunfile.data.Trash.purgeExpired(activity) }
             // 上次开着 MCP 服务的话，随应用一起恢复监听
             runCatching { com.suibian.sunfile.data.Mcp.autoStart(activity) }
+            // 通道恢复要起进程验证，放后台，别让首帧等它
+            runCatching {
+                val p = PrefsStore.get(activity).prefs.value
+                com.suibian.sunfile.data.Shell.suCommand = p.customSuCommand.ifBlank { "su" }
+                if (p.autoStartService) com.suibian.sunfile.data.Shell.initDefault()
+            }
         }
         val prefsStore = PrefsStore.get(activity)
         setContent {

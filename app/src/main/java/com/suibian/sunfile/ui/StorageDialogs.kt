@@ -111,7 +111,19 @@ fun StorageDialogHost(
                 Spacer(Modifier.height(10.dp))
                 Text("链接", color = SunColors.TextTertiary, fontSize = 10.sp)
                 Spacer(Modifier.height(6.dp))
-                SunField(uri, { uri = it; kind = com.suibian.sunfile.data.NetKind.guess(it) }, "${kind.scheme}://192.168.1.2/share", mono = true)
+                SunField(
+                    uri,
+                    { uri = it; kind = com.suibian.sunfile.data.NetKind.guess(it) },
+                    when (kind) {
+                        com.suibian.sunfile.data.NetKind.SMB -> "smb://user:pass@192.168.1.2/share"
+                        com.suibian.sunfile.data.NetKind.SFTP -> "sftp://user:pass@192.168.1.2:22/home"
+                        com.suibian.sunfile.data.NetKind.WEBDAV -> "webdav://user:pass@192.168.1.2:5005/dav"
+                        com.suibian.sunfile.data.NetKind.OBJECT -> "s3://AK:SK@minio.local:9000/bucket?region=us-east-1"
+                        com.suibian.sunfile.data.NetKind.FTPS -> "ftps://user:pass@192.168.1.2:21"
+                        else -> "ftp://user:pass@192.168.1.2:21"
+                    },
+                    mono = true
+                )
                 Spacer(Modifier.height(10.dp))
                 Text("名称（可留空）", color = SunColors.TextTertiary, fontSize = 10.sp)
                 Spacer(Modifier.height(6.dp))

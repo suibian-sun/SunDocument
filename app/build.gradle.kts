@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.8.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 26
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.9.0"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 27
 
 android {
     namespace = "com.suibian.sunfile"
@@ -108,6 +108,14 @@ dependencies {
     // Shizuku：把文件操作代理给 shell 进程执行，绕过普通 App 的 SELinux / scoped storage 限制
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // 网络存储：FTP/FTPS 用 commons-net，SFTP 用 jsch，SMB2/3 用 smbj
+    implementation("commons-net:commons-net:3.10.0")
+    implementation("com.github.mwiede:jsch:0.2.20")
+    implementation("com.hierynomus:smbj:0.13.0") {
+        exclude(group = "org.slf4j", module = "slf4j-api")
+    }
+    implementation("org.slf4j:slf4j-api:2.0.13")
+    implementation("org.slf4j:slf4j-nop:2.0.13")
     // 给改过的 APK 重签名（v1 + v2 + v3）
     implementation("com.android.tools.build:apksig:8.5.2")
     // Smali 反汇编 / 汇编：dexlib2 + baksmali + smali（纯 Java，运行期只用 antlr runtime）

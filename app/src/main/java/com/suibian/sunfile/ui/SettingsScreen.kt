@@ -154,7 +154,7 @@ fun SettingsPage(
             ValueRow("启动路径 · 右窗口", prefs.startPathRight.ifBlank { "上次位置" }) {
                 dialog = TextSetting.StartRight
             }
-            SwitchRow("自动启动服务", prefs.autoStartService) {
+            SwitchRow("启动时恢复已授权通道", prefs.autoStartService) {
                 apply { it.copy(autoStartService = !it.autoStartService) }
             }
 
@@ -269,11 +269,24 @@ fun SettingsPage(
             SwitchRow("使用 Shizuku 安装", prefs.installViaShizuku) {
                 apply { it.copy(installViaShizuku = !it.installViaShizuku) }
             }
-            SwitchRow("使用 Dhizuku 安装", prefs.installViaDhizuku) {
+            SwitchRow("检测 Dhizuku（仅检测，不静默）", prefs.installViaDhizuku) {
                 apply { it.copy(installViaDhizuku = !it.installViaDhizuku) }
             }
             SwitchRow("使用 Root 安装", prefs.installViaRoot) {
                 apply { it.copy(installViaRoot = !it.installViaRoot) }
+            }
+            ValueRow(
+                "安装通道优先级",
+                when (prefs.installPriority.uppercase()) {
+                    "ROOT" -> "Root 优先"
+                    "DHIZUKU" -> "Dhizuku 优先"
+                    "SYSTEM" -> "系统安装器优先"
+                    else -> "Shizuku 优先"
+                }
+            ) {
+                val order = listOf("SHIZUKU", "DHIZUKU", "ROOT", "SYSTEM")
+                val next = order[(order.indexOf(prefs.installPriority.uppercase()).coerceAtLeast(0) + 1) % order.size]
+                apply { it.copy(installPriority = next) }
             }
             ValueRow("自定义系统安装器", prefs.customInstaller.ifBlank { "系统默认" }) {
                 dialog = TextSetting.Installer

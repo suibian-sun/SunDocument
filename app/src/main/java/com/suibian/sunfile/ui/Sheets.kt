@@ -110,7 +110,7 @@ sealed interface SheetKind {
     data object New : SheetKind
     data object Sort : SheetKind
     data object Path : SheetKind
-    data object Bookmarks : SheetKind
+    data class Bookmarks(val side: Int = 0) : SheetKind
     data class Entry(val entry: FileEntry) : SheetKind
     data class OpenWith(val file: File) : SheetKind
     data class Apk(val file: File) : SheetKind

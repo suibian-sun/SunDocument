@@ -16,7 +16,9 @@ data class ShellResult(val out: String, val err: String, val code: Int) {
 
 /** 提权引擎：决定 shell 命令最终由谁执行 */
 enum class ShellEngine(val label: String, val detail: String) {
-    NONE("未授权", "只能读写普通应用可访问的目录"),
+    NONE("未启用", "只能读写普通应用可访问的目录"),
+    /** 应用自身 uid 直接跑 /system/bin/sh，不需要任何授权；能读 /、/system、/sdcard 等公开区域 */
+    NATIVE("本地", "系统自带 sh，无需授权，可读根目录与只读系统分区"),
     SHIZUKU("Shizuku", "代理给 shell 进程执行，可读根目录与系统分区"),
     SU("Root", "以 uid 0 执行，可读包括 /data/data 在内的全部目录")
 }
@@ -37,10 +39,10 @@ enum class ShellEngine(val label: String, val detail: String) {
 object Shell {
 
     /**
-     * 当前引擎。默认 NONE：不在浏览时自动提权，否则每次进受限目录都会卡住等授权。
-     * 用 StateFlow 承载，界面可以跟着授权结果实时刷新。
+     * 当前引擎。默认 NATIVE：用应用自己的 uid 跑系统 sh，不需要任何授权，
+     * 打开就能看根目录与只读系统分区。需要 /data 时才升级到 Shizuku / Root。
      */
-    private val _engine = MutableStateFlow(ShellEngine.NONE)
+    private val _engine = MutableStateFlow(ShellEngine.NATIVE)
     val engineState: StateFlow<ShellEngine> = _engine
 
     var engine: ShellEngine
@@ -51,38 +53,60 @@ object Shell {
     @Volatile
     var suCommand: String = "su"
 
-    val rootAvailable: Boolean get() = engine != ShellEngine.NONE
+    /** 是否有真正的提权（Shizuku / Root）；普通文件操作仍按老逻辑走 Java API */
+    val rootAvailable: Boolean
+        get() = engine == ShellEngine.SHIZUKU || engine == ShellEngine.SU
+
+    /** 是否有可用的 shell 通道。NATIVE 永远可用，所以恒为 true */
+    val shellReady: Boolean get() = engine != ShellEngine.NONE
+
+    val privileged: Boolean get() = rootAvailable
 
     val engineLabel: String get() = engine.label
 
     /** 状态一句话，给设置页和错误提示用 */
     val statusText: String get() = when (engine) {
-        ShellEngine.NONE -> "未授权 · 受限目录无法读取"
+        ShellEngine.NONE -> "未启用 · 只能走普通 API"
+        ShellEngine.NATIVE -> "本地 · 无需授权，可读根目录与系统分区"
         ShellEngine.SHIZUKU -> "Shizuku · 可读根目录与系统分区"
         ShellEngine.SU -> "Root · 可读全部目录"
+    }
+
+    /** 启动时恢复通道：只复用已授权过的 Shizuku，不弹框；否则就停在本地 shell */
+    fun initDefault() {
+        if (engine == ShellEngine.NONE) engine = ShellEngine.NATIVE
+        if (engine == ShellEngine.NATIVE && ShizukuBridge.usable()) {
+            activate(ShellEngine.SHIZUKU)
+        }
     }
 
     // ---------------- 授权 ----------------
 
     /**
      * 申请提权，自动选路：已授过权的先用，其次 Shizuku（无弹框、无需 root），
-     * 最后才尝试 su。返回最终生效的引擎。
+     * 最后才尝试 su。都拿不到就停在本地 shell —— 它本来就能读根目录。
      */
     fun requestAuto(): ShellEngine {
-        if (engine != ShellEngine.NONE && verify(engine)) return engine
+        if (rootAvailable && verify(engine)) return engine
         if (ShizukuBridge.usable() && activate(ShellEngine.SHIZUKU)) return engine
         if (activate(ShellEngine.SU)) return engine
-        return ShellEngine.NONE
+        engine = ShellEngine.NATIVE
+        return ShellEngine.NATIVE
     }
 
-    /** 兼容旧调用点：等价于 [requestAuto] */
-    fun requestRoot(): Boolean = requestAuto() != ShellEngine.NONE
+    /** 兼容旧调用点：返回是否拿到了提权通道 */
+    fun requestRoot(): Boolean = requestAuto().let { it == ShellEngine.SHIZUKU || it == ShellEngine.SU }
 
     /** 只申请 Shizuku（不碰 su，不会弹 root 授权框） */
     fun requestShizuku(): Boolean = activate(ShellEngine.SHIZUKU)
 
     /** 只申请 Root */
     fun requestSu(): Boolean = activate(ShellEngine.SU)
+
+    /** 退回本地 shell（放弃提权） */
+    fun useNative() {
+        engine = ShellEngine.NATIVE
+    }
 
     /**
      * 切到指定引擎并实际验证一次：能让 `id` 跑通才算成功。
@@ -94,6 +118,10 @@ object Shell {
             return false
         }
         if (target == ShellEngine.SHIZUKU && !ShizukuBridge.usable()) return false
+        if (target == ShellEngine.NATIVE) {
+            engine = ShellEngine.NATIVE
+            return true
+        }
         val prev = engine
         engine = target
         val ok = verify(target)
@@ -111,6 +139,7 @@ object Shell {
                 ShellEngine.SU -> r.ok && out.contains("uid=0")
                 // shell 身份是 uid 2000；用 root 启动的 Shizuku 也可能是 0
                 ShellEngine.SHIZUKU -> r.ok && (out.contains("uid=2000") || out.contains("uid=0"))
+                ShellEngine.NATIVE -> r.ok && out.contains("uid=")
                 ShellEngine.NONE -> false
             }
         } catch (e: Exception) {
@@ -122,7 +151,7 @@ object Shell {
 
     /** 忘记已获得的权限（用户主动断开时调用） */
     fun reset() {
-        engine = ShellEngine.NONE
+        engine = ShellEngine.NATIVE
     }
 
     // ---------------- 进程 ----------------
@@ -132,7 +161,7 @@ object Shell {
         ShellEngine.SU -> ProcessBuilder(suCommand, "-c", script).start()
         ShellEngine.SHIZUKU -> ShizukuBridge.newProcess(arrayOf("/system/bin/sh", "-c", script))
             ?: throw IOException("Shizuku 未能创建进程")
-        ShellEngine.NONE -> ProcessBuilder("/system/bin/sh", "-c", script).start()
+        ShellEngine.NATIVE, ShellEngine.NONE -> ProcessBuilder("/system/bin/sh", "-c", script).start()
     }
 
     /** 直接跑一个命令行（用于 su 探测，不经过引擎分派） */
@@ -166,7 +195,7 @@ object Shell {
      */
     private fun degradeIfBroken() {
         if (engine == ShellEngine.SHIZUKU && !ShizukuBridge.usable()) {
-            engine = ShellEngine.NONE
+            engine = ShellEngine.NATIVE
         }
     }
 
@@ -202,10 +231,14 @@ object Shell {
         return r.out.trim().takeIf { it.isNotEmpty() }
     }
 
-    /** 以当前引擎执行一段 shell 脚本 */
+    /** 以当前引擎执行一段 shell 脚本（NATIVE 也执行，只是身份是应用自己） */
     fun sh(script: String, timeoutMs: Long = 20_000): ShellResult =
         if (engine == ShellEngine.NONE) ShellResult("", "shell engine disabled", -1)
         else execScript(script, timeoutMs)
+
+    /** 目录是否存在；NATIVE 下 Java 的 exists() 对 /data 会误判，用 shell 再确认 */
+    fun shellExists(path: String): Boolean =
+        sh("[ -e ${q(path)} ] && echo 1 || echo 0", 6_000).out.trim() == "1"
 
     /** 二进制安全的读取：脚本 stdout 原样取回，不做任何编码转换 */
     fun execScriptBytes(script: String, timeoutMs: Long = 20_000): ByteArray {

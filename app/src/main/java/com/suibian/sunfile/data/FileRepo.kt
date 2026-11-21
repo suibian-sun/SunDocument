@@ -90,14 +90,15 @@ object FileRepo {
      * 两者都不可用时返回空列表与一句原因，不再伪造挂载点条目。
      */
     fun listDetailed(dir: File, showHidden: Boolean, sort: SortSpec): DirListing {
-        if (!dir.exists() && !Shell.rootAvailable) {
+        if (!dir.exists() && !Shell.shellExists(dir.absolutePath)) {
             return DirListing(emptyList(), true, "目录不存在")
         }
         if (dir.exists() && !dir.isDirectory) return DirListing(emptyList(), true, "不是目录")
 
         // 根目录与系统分区：普通 API 要么直接失败，要么只吐出零星几条（隐藏了大部分）。
-        // 既然已经拿到了提权通道，就直接用它读，避免出现「看着有内容其实不全」的假目录。
-        if (Shell.rootAvailable && (dir.absolutePath == "/" || isSystemRestricted(dir))) {
+        // 本地 sh（应用自己的 uid）就能完整枚举 /、/system、/vendor 这些公开区域，
+        // 不需要 Shizuku 或 Root —— 这也是「终端能看根目录」的同一个通道。
+        if (Shell.shellReady && (dir.absolutePath == "/" || (isSystemRestricted(dir) && !dir.canRead()))) {
             val viaShell = Shell.list(dir.absolutePath, showHidden)
             if (viaShell != null) return DirListing(sort(viaShell, sort), false, null)
         }
@@ -111,8 +112,8 @@ object FileRepo {
         }
 
         if (names == null) {
-            // 系统限制 → 交给 root 拿真实数据
-            val viaRoot = if (Shell.rootAvailable) Shell.list(dir.absolutePath, showHidden) else null
+            // 系统限制 → 交给 shell 拿真实数据（本地身份读不到的，提权后能读到）
+            val viaRoot = if (Shell.shellReady) Shell.list(dir.absolutePath, showHidden) else null
             if (viaRoot != null) return DirListing(sort(viaRoot, sort), false, null)
             return DirListing(emptyList(), true, restrictedMessage(dir))
         }
@@ -157,8 +158,8 @@ object FileRepo {
             )
         }
         if (result.isEmpty()) {
-            // 空可能是权限导致的"假空目录"，用 root 复核一次
-            val viaRoot = if (Shell.rootAvailable) Shell.list(dir.absolutePath, showHidden) else null
+            // 空可能是权限导致的"假空目录"，用 shell 复核一次
+            val viaRoot = if (Shell.shellReady) Shell.list(dir.absolutePath, showHidden) else null
             if (viaRoot != null && viaRoot.isNotEmpty()) return DirListing(sort(viaRoot, sort), false, null)
         }
         val sorted = sort(result, sort)
@@ -174,10 +175,11 @@ object FileRepo {
     private fun isSystemRestricted(dir: File): Boolean {
         val p = dir.absolutePath
         if (p.contains("/Android/data") || p.contains("/Android/obb")) return true
-        if (p == "/data" || p == "/data/app" || p == "/data/system" || p == "/data/misc" ||
-            p == "/data/dalvik-cache" || p == "/data/vendor" || p == "/data/adb"
+        if (p == "/data" || p.startsWith("/data/")) return true
+        if (p == "/proc" || p == "/sys" || p == "/system" || p == "/vendor" || p == "/product" ||
+            p == "/apex" || p == "/odm" || p == "/system_ext" || p == "/vendor_dlkm" ||
+            p == "/system_dlkm" || p == "/init.rc" || p == "/default.prop"
         ) return true
-        if (p == "/proc" || p == "/sys" || p == "/system" || p == "/vendor" || p == "/product") return true
         return false
     }
 
@@ -186,14 +188,15 @@ object FileRepo {
         val base = when {
             p.contains("/Android/data") || p.contains("/Android/obb") -> "需要 Root 才能读取应用数据目录"
             p == "/data" || p.startsWith("/data/") -> "需要 Root 才能读取系统数据分区"
-            p.startsWith("/system") || p.startsWith("/vendor") -> "需要 Root 才能读取系统分区"
+            p.startsWith("/system") || p.startsWith("/vendor") -> "没有读取该分区的权限"
             p.startsWith("/proc") || p.startsWith("/sys") -> "需要 Root 才能读取内核文件系统"
             p == "/storage/emulated/0" || p.startsWith("/storage/emulated/0/") -> "缺少存储访问权限"
             else -> "没有读取权限"
         }
-        // 还没开任何通道时，明确告诉用户去哪儿开；开了 Shizuku 仍读不到，说明确实要 Root
+        // 本地身份读不到时，告诉用户升级到哪一级；已经用了 Shizuku 仍失败，说明确实要 Root
         return when (Shell.engine) {
-            ShellEngine.NONE -> "$base · 可在侧边栏「工具 → 更多工具」或设置里启用 Shizuku"
+            ShellEngine.NONE -> "$base · 启用本地 shell 后即可浏览公开区域"
+            ShellEngine.NATIVE -> "$base · 本地身份只能读公开区域，可在设置里接入 Shizuku 或 Root"
             ShellEngine.SHIZUKU -> "$base（Shizuku 是 shell 身份，此目录需要真正的 Root）"
             ShellEngine.SU -> base
         }

@@ -17,6 +17,23 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.9.0",
+            date = "2026-11-21",
+            title = "内置六种网络协议与真正的终端",
+            items = listOf(
+                "网络存储不再是「交给系统打开」：FTP / FTPS / SFTP / SMB / WebDAV / S3 六种协议内置客户端，可直接列目录、上传、下载、新建文件夹、重命名、删除",
+                "远程浏览页支持断线重连、按条目下载到 Download、点击文件下载到缓存后交给对应应用打开",
+                "网络缩略图参数真正生效：总开关、仅 Wi-Fi、单图上限、连接超时四项都参与判断与请求",
+                "终端重写为 VT100/xterm 模拟器：网格缓冲、光标定位、16/256/truecolor、备用屏、回滚 5000 行，vim/top 这类全屏程序能正常显示",
+                "终端界面与 Termux 一致：扩展键行（ESC/CTRL/ALT/TAB/方向键/Home/End/PgUp/PgDn）、点按输入、长按复制、字号调节、多会话常驻",
+                "新增「本地」shell 引擎：不申请 Shizuku 或 Root，用应用自身身份直接跑 /system/bin/sh，可列 /、/system、/vendor、/product、/apex 与 /sdcard",
+                "文件管理器对根目录与受限系统分区改走 shell 枚举，未授权也能看到真实的根目录结构",
+                "APK 安装四通道接线：Shizuku / Root 静默安装（pm install 流式送入）、系统安装器、自定义安装器；安装前解析包名版本、可选签名校验、安装后删除安装包",
+                "底栏上滑书签支持分左右：从左半屏上滑开左栏收藏，右半屏开右栏收藏",
+                "Dhizuku 只做可用性检测并在界面说明「不提供静默安装接口」，不伪装成静默通道"
+            )
+        ),
+        ChangeEntry(
             version = "1.8.0",
             date = "2026-11-21",
             title = "去掉分割线，重做侧边栏与设置",
