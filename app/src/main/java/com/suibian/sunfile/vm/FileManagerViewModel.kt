@@ -121,15 +121,30 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun init() {
         if (initialized) return
         initialized = true
+        val cfg = prefsStore.prefs.value
+        val fallback = "/storage/emulated/0"
+        // 启动路径优先用设置里写死的，其次恢复到上次离开的位置
+        val left = cfg.startPathLeft.ifBlank {
+            prefsStore.lastPath(0)?.takeIf { it.isNotBlank() } ?: fallback
+        }
+        val right = cfg.startPathRight.ifBlank {
+            prefsStore.lastPath(1)?.takeIf { it.isNotBlank() } ?: fallback
+        }
         // 首栏先出，第二栏稍后一点，避免启动瞬间两倍 IO 抢同一个目录；
         // 存储统计单独在后台跑，首帧不等它
-        load(0, "/storage/emulated/0", record = false, pushHistory = false)
+        load(0, left, record = false, pushHistory = false)
         viewModelScope.launch {
             kotlinx.coroutines.delay(140)
-            load(1, "/storage/emulated/0", record = false, pushHistory = false)
+            load(1, right, record = false, pushHistory = false)
         }
         viewModelScope.launch {
-            _storage.value = withContext(Dispatchers.IO) { StorageStats.of("/storage/emulated/0") }
+            _storage.value = withContext(Dispatchers.IO) { StorageStats.of(left) }
+        }
+        // 回收站按设置的保留天数清理；0 表示永不自动清理
+        if (cfg.trashEnabled && cfg.trashAutoCleanDays > 0) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { Trash.purgeExpired(getApplication(), cfg.trashAutoCleanDays) }
+            }
         }
     }
 
@@ -446,7 +461,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     try {
                         if (clip.cut) FileRepo.move(src, destDir) { n, d, t -> report(n, d, t) }
-                        else FileRepo.copy(src, destDir) { n, d, t -> report(n, d, t) }
+                        else FileRepo.copy(src, destDir, prefsStore.prefs.value.keepFileTime) { n, d, t -> report(n, d, t) }
                     } catch (e: Exception) {
                         err = e.message ?: "操作失败"
                         break
@@ -494,7 +509,7 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     try {
                         if (cut) FileRepo.move(src, destDir) { n, d, t -> report(n, d, t) }
-                        else FileRepo.copy(src, destDir) { n, d, t -> report(n, d, t) }
+                        else FileRepo.copy(src, destDir, prefsStore.prefs.value.keepFileTime) { n, d, t -> report(n, d, t) }
                     } catch (e: Exception) {
                         err = e.message ?: "操作失败"
                         break
@@ -529,12 +544,14 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun deletePaths(paths: List<String>, trash: Boolean = true, onDone: () -> Unit = {}) {
         if (paths.isEmpty() || _busy.value != null) return
         val ctx = getApplication<android.app.Application>()
+        // 回收站关掉之后，删除就是真的删除，不再偷偷留一份
+        val useTrash = trash && prefsStore.prefs.value.trashEnabled
         viewModelScope.launch {
-            _busy.value = OpState(if (trash) "正在移到回收站…" else "正在删除…", "", 0, paths.size.toLong())
+            _busy.value = OpState(if (useTrash) "正在移到回收站…" else "正在删除…", "", 0, paths.size.toLong())
             val fail = withContext(Dispatchers.IO) {
                 var err: String? = null
                 for ((i, path) in paths.withIndex()) {
-                    val r = if (trash) Trash.move(ctx, File(path))
+                    val r = if (useTrash) Trash.move(ctx, File(path))
                     else runCatching { FileRepo.delete(File(path)) }.exceptionOrNull()?.message
                     if (r != null) {
                         err = r
@@ -548,20 +565,21 @@ class FileManagerViewModel(app: Application) : AndroidViewModel(app) {
             mutate(_active.value) { it.copy(selected = emptySet()) }
             refreshAll()
             onDone()
-            _messages.tryEmit(fail ?: if (trash) "已移到回收站（${paths.size} 项）" else "已删除 ${paths.size} 项")
+            _messages.tryEmit(fail ?: if (useTrash) "已移到回收站（${paths.size} 项）" else "已删除 ${paths.size} 项")
         }
     }
 
     fun deletePath(path: String, trash: Boolean = true, onDone: () -> Unit = {}) {
+        val useTrash = trash && prefsStore.prefs.value.trashEnabled
         val ctx = getApplication<android.app.Application>()
         viewModelScope.launch {
             val err = withContext(Dispatchers.IO) {
-                if (trash) Trash.move(ctx, File(path))
+                if (useTrash) Trash.move(ctx, File(path))
                 else runCatching { FileRepo.delete(File(path)) }.exceptionOrNull()?.message
             }
             refreshAll()
             onDone()
-            _messages.tryEmit(err ?: if (trash) "已移到回收站" else "已删除")
+            _messages.tryEmit(err ?: if (useTrash) "已移到回收站" else "已删除")
         }
     }
 

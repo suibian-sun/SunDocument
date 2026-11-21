@@ -258,10 +258,20 @@ val NumberStyle = TextStyle(
 @Composable
 fun SunDocumentTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
+    accent: Long = 0L,
     content: @Composable () -> Unit
 ) {
     val dark = mode.isDark(isSystemInDarkTheme())
-    val palette = if (dark) DarkPalette else LightPalette
+    val base = if (dark) DarkPalette else LightPalette
+    // 用户在设置里挑了主题色就替换强调色，其余语义色不动
+    val palette = if (accent != 0L) {
+        val c = Color(accent)
+        base.copy(
+            Accent = c,
+            AccentSoft = c.copy(alpha = if (dark) 0.20f else 0.12f),
+            AccentLine = c.copy(alpha = if (dark) 0.55f else 0.35f)
+        )
+    } else base
     val scheme = if (dark) {
         darkColorScheme(
             primary = palette.Accent,

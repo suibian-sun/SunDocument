@@ -43,14 +43,14 @@ fun ChangelogPage(onBack: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(SunColors.Bg)
-            .statusBarsPadding()
             .navigationBarsPadding()
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
+                .background(SunColors.TopBar)
+                .statusBarsPadding()
                 .height(Mt.BarHeight)
-                .background(SunColors.Surface1)
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -58,11 +58,11 @@ fun ChangelogPage(onBack: () -> Unit) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextPrimary,
+                    tint = SunColors.OnTopBar,
                     modifier = Modifier.size(21.dp)
                 )
             }
-            Text("历史更新", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text("历史更新", color = SunColors.OnTopBar, fontSize = 17.sp, fontWeight = FontWeight.Medium)
         }
 
         LazyColumn(contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {

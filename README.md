@@ -311,7 +311,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.7.1 -PappVersionCode=25
+./gradlew assembleRelease -PappVersionName=1.8.0 -PappVersionCode=26
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -322,7 +322,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.7.1 && git push origin v1.7.1`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.8.0 && git push origin v1.8.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -357,6 +357,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.8.0 | 去分割线改用层级与光影；侧边栏同顶栏配色、三区块可折叠；本地存储走系统目录选择器，网络存储支持六种协议；设置页重写为九分类并全部接线；插件入口合并 |
 | 1.7.1 | 接入 Shizuku 引擎：文件操作代理给 shell 进程执行，可读根目录、/system、/vendor；Shizuku / Root / 普通 API 三条通道自动选路 |
 | 1.7.0 | 侧边栏重做（顶部导航 + 本地存储容量条 + 网络存储分组 + 工具区）；九件新工具：已安装应用、远程管理、签名密钥、Smali 指令、常用密码、音乐播放器、流媒体、远程 Payload、屏幕取色；搜索历史七条下拉 + 我的收藏；页面底色 #303030 / #FAFAFA，顶栏 #151515 / #303030，双栏 2dp 高对比分割线 |
 | 1.6.1 | 深炭灰暗色主题（非纯黑磨砂质感）与纯白亮色主题（极致对比、留白呼吸感）；聚焦栏明暗分层；分割线暗色消隐、亮色锐利 |

@@ -138,6 +138,10 @@ object FileRepo {
                 st != null -> st.st_mtime * 1000L
                 else -> try { f.lastModified() } catch (e: Exception) { 0L }
             }
+            val ctime = when {
+                st != null -> st.st_ctime * 1000L
+                else -> 0L
+            }
             result.add(
                 FileEntry(
                     file = f,
@@ -145,6 +149,7 @@ object FileRepo {
                     isDir = isDir,
                     size = len,
                     lastModified = mtime,
+                    created = ctime,
                     isHidden = n.startsWith("."),
                     canRead = try { f.canRead() } catch (e: Exception) { false },
                     canWrite = try { f.canWrite() } catch (e: Exception) { false }
@@ -320,9 +325,14 @@ object FileRepo {
      * 复制文件或目录到目标目录，回调进度。
      * @param onProgress (当前文件相对路径, 已完成字节, 总字节)
      */
-    fun copy(src: File, destDir: File, onProgress: (String, Long, Long) -> Unit) {
+    fun copy(
+        src: File,
+        destDir: File,
+        keepTime: Boolean = true,
+        onProgress: (String, Long, Long) -> Unit
+    ) {
         val total = if (src.isFile) src.length() else dirSize(src)
-        copyRec(src, destDir, total, LongArray(1), onProgress)
+        copyRec(src, destDir, total, LongArray(1), keepTime, onProgress)
         onProgress(src.name, total, total)
     }
 
@@ -331,13 +341,14 @@ object FileRepo {
         destDir: File,
         total: Long,
         counter: LongArray,
+        keepTime: Boolean,
         onProgress: (String, Long, Long) -> Unit
     ) {
         if (src.isDirectory) {
             val target = uniqueTarget(destDir, src.name)
             if (!target.mkdirs() && !target.isDirectory) throw IOException("无法创建目录 ${target.name}")
             val children = src.listFiles() ?: return
-            for (c in children) copyRec(c, target, total, counter, onProgress)
+            for (c in children) copyRec(c, target, total, counter, keepTime, onProgress)
         } else {
             val target = uniqueTarget(destDir, src.name)
             FileInputStream(src).use { input ->
@@ -353,17 +364,23 @@ object FileRepo {
                     output.flush()
                 }
             }
-            target.setLastModified(src.lastModified())
+            // 保留原文件时间：整理素材时排序不会因为复制而全跳到今天
+            if (keepTime) target.setLastModified(src.lastModified())
         }
     }
 
-    fun move(src: File, destDir: File, onProgress: (String, Long, Long) -> Unit) {
+    fun move(
+        src: File,
+        destDir: File,
+        keepTime: Boolean = true,
+        onProgress: (String, Long, Long) -> Unit
+    ) {
         val target = uniqueTarget(destDir, src.name)
         if (src.renameTo(target)) {
             onProgress(src.name, 1, 1)
             return
         }
-        copy(src, destDir, onProgress)
+        copy(src, destDir, keepTime, onProgress)
         delete(src)
     }
 

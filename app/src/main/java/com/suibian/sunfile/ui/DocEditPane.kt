@@ -153,16 +153,16 @@ fun DocEditPane(file: File, onClose: () -> Unit, onSaved: () -> Unit) {
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.TextPrimary, modifier = Modifier.size(21.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.OnTopBar, modifier = Modifier.size(21.dp))
             }
             Column(Modifier.weight(1f)) {
                 Text(
                     file.name,
-                    color = SunColors.TextPrimary,
+                    color = SunColors.OnTopBar,
                     fontSize = 15.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,

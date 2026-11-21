@@ -165,21 +165,21 @@ internal fun OverlayShell(
                 .navigationBarsPadding()
         ) {
             Row(
-                Modifier.fillMaxWidth().height(Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         "返回",
-                        tint = SunColors.TextPrimary,
+                        tint = SunColors.OnTopBar,
                         modifier = Modifier.size(21.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         title,
-                        color = SunColors.TextPrimary,
+                        color = SunColors.OnTopBar,
                         fontSize = 16.5.sp,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 0.sp,

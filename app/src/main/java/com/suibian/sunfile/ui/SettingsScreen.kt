@@ -3,6 +3,7 @@ package com.suibian.sunfile.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,130 +76,294 @@ import java.io.File
 @Composable
 fun SettingsPage(
     prefs: AppPrefs,
-    showHidden: Boolean,
+    apply: ((AppPrefs) -> AppPrefs) -> Unit,
     onBack: () -> Unit,
-    onToggleHidden: () -> Unit,
-    onSort: () -> Unit,
-    onToggleAutoCheck: () -> Unit,
-    onToggleAccelerator: () -> Unit,
-    onCheckUpdate: () -> Unit,
-    onEditorPrefs: (Int?, Boolean?, Boolean?, Boolean?) -> Unit,
-    onThemeChange: (ThemeMode) -> Unit,
-    onClearOpenWith: () -> Unit,
-    onClearRecent: () -> Unit,
     onRequestRoot: () -> Unit,
+    onRequestShizuku: () -> Unit,
+    onInstallShizuku: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onChangelog: () -> Unit,
     onAbout: () -> Unit,
-    dataDir: String = "",
-    onOpenWithManager: () -> Unit = {},
-    onChangelog: () -> Unit = {},
-    onTrash: () -> Unit = {},
-    onHtmlMode: (String) -> Unit = {},
-    onPlugins: () -> Unit = {},
-    onMcp: () -> Unit = {},
-    onInspect: () -> Unit = {},
-    onMtPlugins: () -> Unit = {}
+    onOpenSource: () -> Unit,
+    onThanks: () -> Unit,
+    onAppInfo: () -> Unit,
+    onTrash: () -> Unit,
+    dataDir: String = ""
 ) {
+    val context = LocalContext.current
+    val engine by Shell.engineState.collectAsState()
+    var dialog by remember { mutableStateOf<TextSetting?>(null) }
+
     Column(
         Modifier
             .fillMaxSize()
             .background(SunColors.Bg)
-            .statusBarsPadding()
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(com.suibian.sunfile.ui.theme.Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(SunColors.TopBar)
+                .statusBarsPadding()
+                .height(com.suibian.sunfile.ui.theme.Mt.BarHeight)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextPrimary,
+                    tint = SunColors.OnTopBar,
                     modifier = Modifier.size(21.dp)
                 )
             }
-            Text("设置", color = SunColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text(
+                "设置",
+                color = SunColors.OnTopBar,
+                fontSize = 16.5.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionTitle("外观")
-            ThemeSegmented(prefs.themeMode, onThemeChange)
 
-            SectionTitle("浏览")
-            SwitchRow("显示隐藏文件", "以 . 开头的文件和目录", showHidden, onToggleHidden)
-            ValueRow("排序方式", "${prefs.sort.mode.label}${if (prefs.sort.ascending) " · 升序" else " · 降序"}", onSort)
+            // ---------------- 启动 ----------------
+            Category("启动")
+            ActionRow(
+                "请求 Root 权限",
+                if (engine == ShellEngine.SU) "已授权" else "未授权",
+                onRequestRoot
+            )
+            ActionRow(
+                "请求 Shell 权限",
+                when (engine) {
+                    ShellEngine.SHIZUKU -> "已授权"
+                    else -> ShizukuBridge.statusText(context)
+                },
+                onRequestShizuku
+            )
+            ValueRow("自定义 su 命令", prefs.customSuCommand) { dialog = TextSetting.Su }
+            ActionRow(
+                "安装 Shizuku",
+                if (ShizukuBridge.installed(context)) "已安装" else "未安装",
+                onInstallShizuku
+            )
+            ValueRow("启动路径 · 左窗口", prefs.startPathLeft.ifBlank { "上次位置" }) {
+                dialog = TextSetting.StartLeft
+            }
+            ValueRow("启动路径 · 右窗口", prefs.startPathRight.ifBlank { "上次位置" }) {
+                dialog = TextSetting.StartRight
+            }
+            SwitchRow("自动启动服务", prefs.autoStartService) {
+                apply { it.copy(autoStartService = !it.autoStartService) }
+            }
 
-            SectionTitle("更新")
-            SwitchRow("启动时检查更新", "打开应用后自动读取 GitHub Release", prefs.autoCheckUpdate, onToggleAutoCheck)
-            SwitchRow("下载加速", "优先使用公共镜像线路，失败自动回退", prefs.useAccelerator, onToggleAccelerator)
-            ValueRow("检查更新", "v${BuildConfig.VERSION_NAME}", onCheckUpdate)
-            ValueRow("历史更新", "", onChangelog)
-            ValueRow("回收站", "", onTrash)
-            ValueRow("插件", "", onPlugins)
-            ValueRow("MT 插件", "", onMtPlugins)
-
-            SectionTitle("开发者")
-            ValueRow("界面分析", "", onInspect)
-            ValueRow("MCP 服务", "", onMcp)
-
+            Divider()
+            // ---------------- 外观 ----------------
+            Category("外观")
+            ThemeSegmented(prefs.themeMode) { mode -> apply { it.copy(themeMode = mode) } }
+            AccentRow(prefs.accentColor) { color -> apply { it.copy(accentColor = color) } }
             ValueRow(
-                "网页与 Markdown",
-                when (prefs.htmlMode) {
-                    "PREVIEW" -> "点击直接预览"
-                    "EDIT" -> "点击直接编辑"
-                    else -> "每次询问"
+                "文件列表大小",
+                when (prefs.fileListSize) {
+                    -1 -> "紧凑"
+                    1 -> "宽松"
+                    else -> "标准"
                 }
             ) {
-                onHtmlMode(
-                    when (prefs.htmlMode) {
-                        "ASK" -> "PREVIEW"
-                        "PREVIEW" -> "EDIT"
-                        else -> "ASK"
-                    }
-                )
-            }
-
-            SectionTitle("编辑器")
-            ValueRow(
-                "字号",
-                "${prefs.editorFontSize} sp · 点击切换",
-                onClick = {
-                    val next = when {
-                        prefs.editorFontSize < 14 -> 14
-                        prefs.editorFontSize < 16 -> 16
-                        prefs.editorFontSize < 18 -> 18
-                        else -> 12
-                    }
-                    onEditorPrefs(next, null, null, null)
+                apply {
+                    it.copy(fileListSize = when (it.fileListSize) {
+                        -1 -> 0; 0 -> 1; else -> -1
+                    })
                 }
+            }
+            ValueRow("文件名最大行数", "${prefs.fileNameMaxLines} 行") {
+                apply { it.copy(fileNameMaxLines = if (it.fileNameMaxLines >= 3) 1 else it.fileNameMaxLines + 1) }
+            }
+            ValueRow("文件列表时间偏好", if (prefs.timeByCreated) "创建时间" else "修改时间") {
+                apply { it.copy(timeByCreated = !it.timeByCreated) }
+            }
+            SwitchRow("文件列表不显示权限", prefs.hidePermissions) {
+                apply { it.copy(hidePermissions = !it.hidePermissions) }
+            }
+            ValueRow("时间日期格式", prefs.dateFormat) { dialog = TextSetting.DateFormat }
+            ActionRow("桌面图标", "由系统桌面决定", onAppInfo)
+
+            Divider()
+            // ---------------- 常规 ----------------
+            Category("常规")
+            SwitchRow("生成备份文件", prefs.backupBeforeSave) {
+                apply { it.copy(backupBeforeSave = !it.backupBeforeSave) }
+            }
+            SwitchRow("保留文件时间", prefs.keepFileTime) {
+                apply { it.copy(keepFileTime = !it.keepFileTime) }
+            }
+            SwitchRow("启用输入框收藏", prefs.inputFavorites) {
+                apply { it.copy(inputFavorites = !it.inputFavorites) }
+            }
+            SwitchRow("文件列表显示隐藏文件", prefs.showHidden) {
+                apply { it.copy(showHidden = !it.showHidden) }
+            }
+            ValueRow("排序", "${prefs.sort.mode.label}${if (prefs.sort.ascending) " · 升序" else " · 降序"}") {
+                apply { it.copy(sort = it.sort.nextFor(it.sort.mode)) }
+            }
+            ValueRow("自定义 MT2 目录", prefs.customMt2Dir.ifBlank { dataDir.ifBlank { "默认" } }) {
+                dialog = TextSetting.Mt2Dir
+            }
+            ValueRow("编辑器字号", "${prefs.editorFontSize} sp") {
+                apply {
+                    it.copy(editorFontSize = when {
+                        it.editorFontSize < 14 -> 14
+                        it.editorFontSize < 16 -> 16
+                        it.editorFontSize < 18 -> 18
+                        else -> 12
+                    })
+                }
+            }
+            SwitchRow("编辑器自动换行", prefs.editorWrap) {
+                apply { it.copy(editorWrap = !it.editorWrap) }
+            }
+            SwitchRow("编辑器行号", prefs.editorLineNumbers) {
+                apply { it.copy(editorLineNumbers = !it.editorLineNumbers) }
+            }
+            SwitchRow("编辑器代码补全", prefs.editorCompletion) {
+                apply { it.copy(editorCompletion = !it.editorCompletion) }
+            }
+
+            Divider()
+            // ---------------- 回收站 ----------------
+            Category("回收站")
+            SwitchRow("启用回收站", prefs.trashEnabled) {
+                apply { it.copy(trashEnabled = !it.trashEnabled) }
+            }
+            SwitchRow("默认移动到回收站", prefs.defaultMoveToTrash) {
+                apply { it.copy(defaultMoveToTrash = !it.defaultMoveToTrash) }
+            }
+            ValueRow(
+                "自动清理",
+                if (prefs.trashAutoCleanDays <= 0) "不清理" else "${prefs.trashAutoCleanDays} 天前"
+            ) {
+                apply {
+                    it.copy(trashAutoCleanDays = when (it.trashAutoCleanDays) {
+                        0 -> 7; 7 -> 30; 30 -> 90; else -> 0
+                    })
+                }
+            }
+            SwitchRow("显示删除警告", prefs.showDeleteWarning) {
+                apply { it.copy(showDeleteWarning = !it.showDeleteWarning) }
+            }
+            ActionRow("打开回收站", "", onTrash)
+
+            Divider()
+            // ---------------- 安装 ----------------
+            Category("安装")
+            SwitchRow("APK 安装验证", prefs.verifyApk) {
+                apply { it.copy(verifyApk = !it.verifyApk) }
+            }
+            SwitchRow("安装后删除安装包", prefs.deleteApkAfterInstall) {
+                apply { it.copy(deleteApkAfterInstall = !it.deleteApkAfterInstall) }
+            }
+            SwitchRow("安装前二次确认", prefs.confirmInstall) {
+                apply { it.copy(confirmInstall = !it.confirmInstall) }
+            }
+            SwitchRow("使用 Shizuku 安装", prefs.installViaShizuku) {
+                apply { it.copy(installViaShizuku = !it.installViaShizuku) }
+            }
+            SwitchRow("使用 Dhizuku 安装", prefs.installViaDhizuku) {
+                apply { it.copy(installViaDhizuku = !it.installViaDhizuku) }
+            }
+            SwitchRow("使用 Root 安装", prefs.installViaRoot) {
+                apply { it.copy(installViaRoot = !it.installViaRoot) }
+            }
+            ValueRow("自定义系统安装器", prefs.customInstaller.ifBlank { "系统默认" }) {
+                dialog = TextSetting.Installer
+            }
+            InfoRow(
+                "安装优先级",
+                "按 Shizuku → Root → 系统安装器依次尝试，前一个不可用才交给下一个。"
             )
-            SwitchRow("自动换行", "长行自动折行显示", prefs.editorWrap) {
-                onEditorPrefs(null, !prefs.editorWrap, null, null)
+
+            Divider()
+            // ---------------- 书签与底栏 ----------------
+            Category("书签与底栏")
+            SwitchRow("侧边栏显示书签", prefs.sidebarBookmarks) {
+                apply { it.copy(sidebarBookmarks = !it.sidebarBookmarks) }
             }
-            SwitchRow("显示行号", "关闭后更适合阅读长段落", prefs.editorLineNumbers) {
-                onEditorPrefs(null, null, !prefs.editorLineNumbers, null)
+            SwitchRow("新书签置顶", prefs.bookmarkToTop) {
+                apply { it.copy(bookmarkToTop = !it.bookmarkToTop) }
             }
-            SwitchRow("代码补全", "按上下文给出关键字、符号与片段", prefs.editorCompletion) {
-                onEditorPrefs(null, null, null, !prefs.editorCompletion)
+            SwitchRow("书签上滑分左右", prefs.bookmarkSwipeSplit) {
+                apply { it.copy(bookmarkSwipeSplit = !it.bookmarkSwipeSplit) }
             }
-            InfoRow("修改历史", "保存前自动留档，单个文件保留最近 30 个版本")
+            SwitchRow("底栏增加下边距", prefs.bottomBarExtra) {
+                apply { it.copy(bottomBarExtra = !it.bottomBarExtra) }
+            }
+            ValueRow("下边距大小", "${prefs.bottomBarPadding} dp") {
+                apply {
+                    it.copy(
+                        bottomBarPadding = when (it.bottomBarPadding) {
+                            0 -> 4; 4 -> 8; 8 -> 12; 12 -> 16; else -> 0
+                        }
+                    )
+                }
+            }
 
-            SectionTitle("存储访问")
-            StorageAccessRows(onGranted = onRequestRoot)
+            Divider()
+            // ---------------- 外置存储 ----------------
+            Category("外置存储")
+            SwitchRow("加载缩略图", prefs.externalThumbs) {
+                apply { it.copy(externalThumbs = !it.externalThumbs) }
+            }
+            SwitchRow("优化数据传输", prefs.optimizeExternal) {
+                apply { it.copy(optimizeExternal = !it.optimizeExternal) }
+            }
 
-            SectionTitle("打开方式")
-            ValueRow("默认打开方式", "${prefs.openWith.size} 个", onOpenWithManager)
-            ValueRow("清除记住的打开方式", "", onClearOpenWith)
-            ValueRow("清除最近访问", "${prefs.recent.size} 条记录", onClearRecent)
+            Divider()
+            // ---------------- 网络存储 ----------------
+            Category("网络存储")
+            SwitchRow("加载缩略图", prefs.networkThumbs) {
+                apply { it.copy(networkThumbs = !it.networkThumbs) }
+            }
+            SwitchRow("仅在 WLAN 下加载", prefs.networkWifiOnly) {
+                apply { it.copy(networkWifiOnly = !it.networkWifiOnly) }
+            }
+            ValueRow("图片大小限制", "${prefs.networkImageLimitKb} KB") {
+                apply {
+                    it.copy(
+                        networkImageLimitKb = when (it.networkImageLimitKb) {
+                            256 -> 512; 512 -> 1024; 1024 -> 2048; else -> 256
+                        }
+                    )
+                }
+            }
+            ValueRow("加载时间限制", "${prefs.networkTimeoutSec} 秒") {
+                apply {
+                    it.copy(
+                        networkTimeoutSec = when (it.networkTimeoutSec) {
+                            5 -> 10; 10 -> 15; 15 -> 30; else -> 5
+                        }
+                    )
+                }
+            }
 
-            SectionTitle("数据目录")
-            InfoRow("SunMT2", dataDir.ifEmpty { "初始化中…" })
+            Divider()
+            // ---------------- 其他 ----------------
+            Category("其他")
+            ValueRow("语言", if (prefs.language == "zh") "简体中文" else "English") {
+                apply { it.copy(language = if (it.language == "zh") "en" else "zh") }
+            }
+            SwitchRow("启动时检查更新", prefs.autoCheckUpdate) {
+                apply { it.copy(autoCheckUpdate = !it.autoCheckUpdate) }
+            }
+            SwitchRow("下载加速", prefs.useAccelerator) {
+                apply { it.copy(useAccelerator = !it.useAccelerator) }
+            }
+            ActionRow("检测更新", "v${BuildConfig.VERSION_NAME}", onCheckUpdate)
+            ActionRow("历史更新", "", onChangelog)
+            ActionRow("特别鸣谢", "", onThanks)
+            ActionRow("开源地址", "", onOpenSource)
 
-            SectionTitle("关于")
-            ValueRow("版本", "v${BuildConfig.VERSION_NAME}", onAbout)
-            ValueRow("开源地址", "github.com/suibian-sun/SunDocument", onAbout)
-
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(32.dp))
             Text(
                 "SunDocument · Kotlin + Jetpack Compose",
                 color = SunColors.TextTertiary,
@@ -208,107 +373,126 @@ fun SettingsPage(
             Spacer(Modifier.height(20.dp))
         }
     }
-}
 
-/**
- * 存储访问：把「怎么读受限目录」讲清楚，并给出两条通道。
- *
- * Shizuku 是主角——它不需要设备 root，只要装一个用 adb 启动过的 Shizuku 服务，
- * 我们的文件操作就会被代理到 shell 进程执行。普通应用读不到 / 和 /system，
- * 而 shell 身份可以。
- */
-@Composable
-private fun StorageAccessRows(onGranted: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val engine by Shell.engineState.collectAsState()
-    var shizukuText by remember { mutableStateOf(ShizukuBridge.statusText(context)) }
-
-    // 授权框是 Shizuku 自己弹的，结果只能从它的回调里拿。
-    // 真正的接管与刷新由主界面统一处理，这里只负责把文案改过来。
-    DisposableEffect(Unit) {
-        val listener: (Boolean) -> Unit = {
-            shizukuText = ShizukuBridge.statusText(context)
-        }
-        ShizukuBridge.addResultListener(listener)
-        onDispose { ShizukuBridge.removeResultListener(listener) }
-    }
-
-    ValueRow("Shizuku 通道", shizukuText) {
-        when {
-            // 没装：直接送到官方发布页，避免用户下到仿冒包
-            !ShizukuBridge.installed(context) -> {
-                val ok = runCatching {
-                    context.startActivity(
-                        Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
-                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }.isSuccess
-                toast(context, if (ok) "请先安装 Shizuku 并启动服务" else "未安装 Shizuku")
+    dialog?.let { kind ->
+        TextSettingDialog(
+            kind = kind,
+            initial = when (kind) {
+                TextSetting.Su -> prefs.customSuCommand
+                TextSetting.StartLeft -> prefs.startPathLeft
+                TextSetting.StartRight -> prefs.startPathRight
+                TextSetting.DateFormat -> prefs.dateFormat
+                TextSetting.Mt2Dir -> prefs.customMt2Dir
+                TextSetting.Installer -> prefs.customInstaller
+            },
+            onDismiss = { dialog = null },
+            onConfirm = { value ->
+                apply {
+                    when (kind) {
+                        TextSetting.Su -> it.copy(customSuCommand = value)
+                        TextSetting.StartLeft -> it.copy(startPathLeft = value)
+                        TextSetting.StartRight -> it.copy(startPathRight = value)
+                        TextSetting.DateFormat -> it.copy(dateFormat = value)
+                        TextSetting.Mt2Dir -> it.copy(customMt2Dir = value)
+                        TextSetting.Installer -> it.copy(customInstaller = value)
+                    }
+                }
+                dialog = null
             }
-            // 装了但服务没起：唤起 Shizuku 让它自己提示启动方式
-            !ShizukuBridge.running() -> {
-                val ok = runCatching {
-                    val i = context.packageManager.getLaunchIntentForPackage(ShizukuBridge.PACKAGE)
-                        ?: error("no launcher")
-                    context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }.isSuccess
-                toast(context, if (ok) "在 Shizuku 里点「启动」后再回来" else "Shizuku 服务未运行")
-            }
-            !ShizukuBridge.permitted() -> {
-                if (!ShizukuBridge.requestPermission()) toast(context, "无法请求授权")
-            }
-            else -> scope.launch {
-                val ok = withContext(Dispatchers.IO) { Shell.requestShizuku() }
-                shizukuText = ShizukuBridge.statusText(context)
-                onGranted()
-                toast(context, if (ok) "Shizuku 已接管文件操作" else "Shizuku 通道不可用")
-            }
-        }
-    }
-
-    ValueRow(
-        "Root 通道",
-        if (engine == ShellEngine.SU) "已授权 · 可读全部目录" else "未授权 · 点击申请",
-        onGranted
-    )
-
-    if (engine != ShellEngine.NONE) {
-        InfoRow("当前引擎", Shell.statusText)
-    } else {
-        InfoRow(
-            "说明",
-            "Shizuku 以 shell 身份运行，能读根目录与系统分区；/data/data 下的应用私有目录仍需 Root。"
         )
     }
 }
 
+/** 需要弹出文本输入的设置项 */
+private enum class TextSetting { Su, StartLeft, StartRight, DateFormat, Mt2Dir, Installer }
+
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        color = SunColors.TextTertiary,
-        fontSize = 10.5.sp,
-        letterSpacing = 0.5.sp,
-        modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 7.dp)
+private fun TextSettingDialog(
+    kind: TextSetting,
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var value by remember(kind) { mutableStateOf(initial) }
+    val title = when (kind) {
+        TextSetting.Su -> "自定义 su 命令"
+        TextSetting.StartLeft -> "左窗口启动路径"
+        TextSetting.StartRight -> "右窗口启动路径"
+        TextSetting.DateFormat -> "时间日期格式"
+        TextSetting.Mt2Dir -> "自定义 MT2 目录"
+        TextSetting.Installer -> "自定义系统安装器"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SunColors.Surface2,
+        shape = SunShapes.Medium,
+        title = { Text(title, color = SunColors.TextPrimary, fontSize = 15.sp) },
+        text = {
+            BasicTextField(
+                value = value,
+                onValueChange = { value = it },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    color = SunColors.TextPrimary,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SunColors.Surface3, SunShapes.Small)
+                    .padding(10.dp)
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(value.trim()) }) {
+                Text("确定", color = SunColors.Accent, fontSize = 13.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", color = SunColors.TextSecondary, fontSize = 13.sp)
+            }
+        }
     )
 }
 
 @Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onToggle: () -> Unit) {
+private fun Category(text: String) {
+    Text(
+        text,
+        color = SunColors.TextPrimary,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun Divider() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .height(1.dp)
+            .background(SunColors.Hairline)
+    )
+}
+
+@Composable
+private fun SwitchRow(title: String, checked: Boolean, onToggle: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .clickable { onToggle() }
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 20.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = SunColors.TextPrimary, fontSize = 14.5.sp)
-            Text(subtitle, color = SunColors.TextTertiary, fontSize = 10.5.sp)
-        }
+        Text(
+            title,
+            color = SunColors.TextPrimary,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
         Switch(
             checked = checked,
             onCheckedChange = { onToggle() },
@@ -329,10 +513,10 @@ private fun ValueRow(title: String, value: String, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 20.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = SunColors.TextPrimary, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+        Text(title, color = SunColors.TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
         if (value.isNotEmpty()) {
             Text(
                 value,
@@ -340,28 +524,94 @@ private fun ValueRow(title: String, value: String, onClick: () -> Unit) {
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-                textAlign = androidx.compose.ui.text.style.TextAlign.End
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.weight(1f, fill = false)
             )
         }
         Icon(
-            androidx.compose.material.icons.Icons.Outlined.ArrowForward,
+            Icons.Outlined.ArrowForward,
             null,
-            tint = SunColors.TextTertiary.copy(alpha = 0.7f),
-            modifier = Modifier.size(16.dp)
+            tint = SunColors.TextTertiary.copy(alpha = 0.6f),
+            modifier = Modifier.size(14.dp)
         )
+    }
+}
+
+@Composable
+private fun ActionRow(title: String, value: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = SunColors.TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(value, color = SunColors.TextTertiary, fontSize = 12.sp, maxLines = 1)
     }
 }
 
 @Composable
 private fun InfoRow(title: String, subtitle: String) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = SunColors.TextPrimary, fontSize = 13.sp)
-            Text(subtitle, color = SunColors.TextTertiary, fontSize = 9.5.sp, lineHeight = 14.sp)
+            Text(title, color = SunColors.TextSecondary, fontSize = 12.sp)
+            Text(
+                subtitle,
+                color = SunColors.TextTertiary,
+                fontSize = 10.sp,
+                lineHeight = 15.sp,
+                modifier = Modifier.padding(top = 3.dp)
+            )
+        }
+    }
+}
+
+/** 主题色：几个克制的预设，避免用户调出对比度灾难 */
+@Composable
+private fun AccentRow(current: Long, onPick: (Long) -> Unit) {
+    val colors = listOf(
+        0L to "默认",
+        0xFF4A90F7 to "蓝",
+        0xFF3FB950 to "绿",
+        0xFFD9A93F to "琥珀",
+        0xFFE5534B to "红",
+        0xFFC792EA to "紫",
+        0xFF3FC1C9 to "青"
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("主题颜色", color = SunColors.TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            colors.forEach { (value, _) ->
+                val on = current == value
+                Box(
+                    Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (value == 0L) SunColors.Accent else Color(value),
+                            CircleShape
+                        )
+                        .clickable { onPick(value) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (on) {
+                        Box(
+                            Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color.White, CircleShape)
+                        )
+                    }
+                }
+            }
         }
     }
 }

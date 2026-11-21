@@ -75,6 +75,7 @@ fun StorageDialogHost(
 
         StorageDialog.AddNetwork -> {
             var name by remember { mutableStateOf("") }
+            var kind by remember { mutableStateOf(com.suibian.sunfile.data.NetKind.SMB) }
             var uri by remember { mutableStateOf("smb://") }
             var group by remember { mutableStateOf(groups.firstOrNull() ?: DEFAULT_GROUP) }
             Shell(
@@ -84,9 +85,33 @@ fun StorageDialogHost(
                 onConfirm = { if (uri.contains("://")) onAddNetwork(name, uri, group) },
                 enabled = uri.contains("://")
             ) {
+                // 协议决定链接前缀：选完直接把输入框的 scheme 换掉，省得用户记格式
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    com.suibian.sunfile.data.NetKind.entries.forEach { k ->
+                        val on = k == kind
+                        Text(
+                            k.label,
+                            color = if (on) androidx.compose.ui.graphics.Color.White else SunColors.TextSecondary,
+                            fontSize = 10.5.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (on) SunColors.Accent else SunColors.Surface3)
+                                .clickable {
+                                    kind = k
+                                    val rest = uri.substringAfter("://", "")
+                                    uri = "${k.scheme}://$rest"
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 Text("链接", color = SunColors.TextTertiary, fontSize = 10.sp)
                 Spacer(Modifier.height(6.dp))
-                SunField(uri, { uri = it }, "smb://192.168.1.2/share", mono = true)
+                SunField(uri, { uri = it; kind = com.suibian.sunfile.data.NetKind.guess(it) }, "${kind.scheme}://192.168.1.2/share", mono = true)
                 Spacer(Modifier.height(10.dp))
                 Text("名称（可留空）", color = SunColors.TextTertiary, fontSize = 10.sp)
                 Spacer(Modifier.height(6.dp))

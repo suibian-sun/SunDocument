@@ -60,7 +60,7 @@ import java.io.File
  * 插件包格式与 MT 一致（zip 改后缀 .mtp，内含 manifest.json）。
  */
 @Composable
-fun PluginPage(onBack: () -> Unit) {
+fun PluginPage(onBack: () -> Unit, onMtPlugins: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
@@ -100,23 +100,33 @@ fun PluginPage(onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(SunColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextPrimary,
+                    tint = SunColors.OnTopBar,
                     modifier = Modifier.size(21.dp)
                 )
             }
             Text(
                 "插件",
-                color = SunColors.TextPrimary,
+                color = SunColors.OnTopBar,
                 fontSize = 16.5.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
+            )
+            // 两种插件共用这一个入口：MT 插件排在自家插件旁边，不再各占一个菜单项
+            Text(
+                "MT 插件",
+                color = SunColors.OnTopBar.copy(alpha = 0.75f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(SunShapes.Small)
+                    .clickable { onMtPlugins() }
+                    .padding(horizontal = 9.dp, vertical = 7.dp)
             )
             Text(
                 "安装",

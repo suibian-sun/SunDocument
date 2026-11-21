@@ -9,6 +9,8 @@ data class FileEntry(
     val isDir: Boolean,
     val size: Long,
     val lastModified: Long,
+    /** inode 变更时间，作为「创建/变更」这一列的数据源；shell 枚举时为 0 */
+    val created: Long = 0L,
     val isHidden: Boolean,
     val canRead: Boolean,
     val canWrite: Boolean,

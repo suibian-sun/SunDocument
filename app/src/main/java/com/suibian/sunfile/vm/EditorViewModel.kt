@@ -262,6 +262,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     } else {
                         val previous = runCatching { FileRepo.readText(file) }.getOrNull()
                         if (previous != null && previous != content) history.snapshot(file, previous)
+                        // 开启「生成备份文件」时，先留一份同目录的 .bak
+                        if (com.suibian.sunfile.data.PrefsStore.get(getApplication())
+                                .prefs.value.backupBeforeSave && file.length() > 0
+                        ) {
+                            runCatching {
+                                val bak = java.io.File(file.parentFile, file.name + ".bak")
+                                file.copyTo(bak, overwrite = true)
+                            }
+                        }
                         FileRepo.writeText(file, payload, s.encoding)
                         0
                     }

@@ -72,21 +72,20 @@ fun TrashPage(
         Modifier
             .fillMaxSize()
             .background(SunColors.Bg)
-            .statusBarsPadding()
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().height(Mt.BarHeight).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.TextPrimary, modifier = Modifier.size(21.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.OnTopBar, modifier = Modifier.size(21.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text("回收站", color = SunColors.TextPrimary, fontSize = Mt.Title)
+                Text("回收站", color = SunColors.OnTopBar, fontSize = Mt.Title)
                 Text(
                     if (items.isEmpty()) "空" else "${items.size} 项 · 30 天后自动清除",
-                    color = SunColors.TextTertiary,
+                    color = SunColors.OnTopBarMuted,
                     fontSize = Mt.BarMeta
                 )
             }

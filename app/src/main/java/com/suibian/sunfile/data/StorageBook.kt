@@ -8,13 +8,44 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** 用户自行添加的本地存储：只存路径与显示名，不做挂载 */
-data class LocalMount(val name: String, val path: String)
+data class LocalMount(
+    val name: String,
+    val path: String,
+    /** 通过系统目录选择器拿到时附带的 SAF 授权 uri，用于跨进程访问 */
+    val uri: String = ""
+)
 
-/** 网络存储：仅保存名称与链接，点击后交给远程浏览页处理 */
+/** 支持的远程协议；对象存储按 S3 兼容接口处理 */
+enum class NetKind(val label: String, val scheme: String) {
+    FTP("FTP", "ftp"),
+    FTPS("FTPS", "ftps"),
+    SFTP("SFTP", "sftp"),
+    SMB("SMB", "smb"),
+    WEBDAV("WebDAV", "webdav"),
+    OBJECT("对象存储", "s3");
+
+    companion object {
+        fun of(scheme: String): NetKind? =
+            entries.firstOrNull { it.scheme == scheme.lowercase() }
+
+        /** 从链接前缀猜协议，猜不到按 SMB 处理（最常见） */
+        fun guess(uri: String): NetKind {
+            val s = uri.substringBefore("://", "").lowercase()
+            return of(s) ?: when (s) {
+                "webdavs" -> WEBDAV
+                "http", "https" -> WEBDAV
+                else -> SMB
+            }
+        }
+    }
+}
+
+/** 网络存储：名称 + 链接 + 协议 + 分组 */
 data class NetworkMount(
     val name: String,
     val uri: String,
-    val group: String = DEFAULT_GROUP
+    val group: String = DEFAULT_GROUP,
+    val kind: NetKind = NetKind.guess(uri)
 ) {
     /** smb:// / ftp:// / http:// / webdav:// 里的协议名 */
     val scheme: String get() = uri.substringBefore("://", "").lowercase()
@@ -53,13 +84,13 @@ object StorageBook {
         }
     }
 
-    fun addLocal(name: String, path: String): Boolean {
+    fun addLocal(name: String, path: String, uri: String = ""): Boolean {
         val clean = path.trim().trimEnd('/').ifEmpty { "/" }
         if (clean.isBlank()) return false
         val cur = _config.value
         if (cur.locals.any { it.path == clean }) return false
         val label = name.trim().ifBlank { clean.substringAfterLast('/').ifBlank { clean } }
-        commit(cur.copy(locals = cur.locals + LocalMount(label, clean)))
+        commit(cur.copy(locals = cur.locals + LocalMount(label, clean, uri)))
         return true
     }
 
@@ -68,16 +99,17 @@ object StorageBook {
         commit(cur.copy(locals = cur.locals.filterNot { it.path == path }))
     }
 
-    fun addNetwork(name: String, uri: String, group: String): Boolean {
+    fun addNetwork(name: String, uri: String, group: String, kind: NetKind? = null): Boolean {
         val u = uri.trim()
         if (u.isBlank()) return false
         val cur = _config.value
         if (cur.networks.any { it.uri == u }) return false
         val label = name.trim().ifBlank { u.substringAfter("://").substringBefore('/') }
         val g = group.ifBlank { DEFAULT_GROUP }
+        val k = kind ?: NetKind.guess(u)
         commit(
             cur.copy(
-                networks = cur.networks + NetworkMount(label, u, g),
+                networks = cur.networks + NetworkMount(label, u, g, k),
                 groups = (cur.groups + g).distinct()
             )
         )
@@ -153,11 +185,17 @@ object StorageBook {
     private fun encode(c: StorageConfig): String {
         val root = JSONObject()
         root.put("locals", JSONArray().apply {
-            c.locals.forEach { put(JSONObject().put("n", it.name).put("p", it.path)) }
+            c.locals.forEach { put(JSONObject().put("n", it.name).put("p", it.path).put("r", it.uri)) }
         })
         root.put("networks", JSONArray().apply {
             c.networks.forEach {
-                put(JSONObject().put("n", it.name).put("u", it.uri).put("g", it.group))
+                put(
+                    JSONObject()
+                        .put("n", it.name)
+                        .put("u", it.uri)
+                        .put("g", it.group)
+                        .put("k", it.kind.name)
+                )
             }
         })
         root.put("groups", JSONArray().apply { c.groups.forEach { put(it) } })
@@ -172,15 +210,20 @@ object StorageBook {
                 (0 until arr.length()).mapNotNull { i ->
                     val o = arr.optJSONObject(i) ?: return@mapNotNull null
                     val p = o.optString("p")
-                    if (p.isBlank()) null else LocalMount(o.optString("n", p), p)
+                    if (p.isBlank()) null else LocalMount(o.optString("n", p), p, o.optString("r", ""))
                 }
             } ?: emptyList()
             val nets = root.optJSONArray("networks")?.let { arr ->
                 (0 until arr.length()).mapNotNull { i ->
                     val o = arr.optJSONObject(i) ?: return@mapNotNull null
                     val u = o.optString("u")
-                    if (u.isBlank()) null
-                    else NetworkMount(o.optString("n", u), u, o.optString("g", DEFAULT_GROUP))
+                    if (u.isBlank()) null else NetworkMount(
+                        o.optString("n", u),
+                        u,
+                        o.optString("g", DEFAULT_GROUP),
+                        runCatching { NetKind.valueOf(o.optString("k", "")) }.getOrNull()
+                            ?: NetKind.guess(u)
+                    )
                 }
             } ?: emptyList()
             val groups = root.optJSONArray("groups")?.let { arr ->

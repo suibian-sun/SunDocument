@@ -116,6 +116,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -127,6 +128,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -250,6 +252,21 @@ fun MainScreen(
     // 在组合上下文中读一次，供下方非 @Composable 的点击回调使用
     val darkNow = SunColors.dark
 
+    // 列表密度与时间格式：设置一改这里立刻反映到每一行
+    SideEffect {
+        BottomBarStyle.extra = if (prefs.bottomBarExtra) prefs.bottomBarPadding.dp else 0.dp
+        ListStyleHolder.style = ListStyle(
+            rowHeight = when (prefs.fileListSize) {
+                -1 -> Mt.RowHeight - 8.dp
+                1 -> Mt.RowHeight + 12.dp
+                else -> Mt.RowHeight
+            },
+            nameLines = prefs.fileNameMaxLines,
+            dateFormat = prefs.dateFormat,
+            timeByCreated = prefs.timeByCreated
+        )
+    }
+
     var page by remember { mutableStateOf<Page>(Page.Files) }
     var overflowOpen by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<SheetKind?>(null) }
@@ -269,6 +286,24 @@ fun MainScreen(
     var searchOpen by remember { mutableStateOf(false) }
     var storeDialog by remember { mutableStateOf<StorageDialog?>(null) }
     var networkTarget by remember { mutableStateOf<NetworkMount?>(null) }
+    var toolPicker by remember { mutableStateOf(false) }
+
+    // 本地存储不再手输路径，直接跳系统目录选择器，拿 SAF 授权
+    val folderPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            val name = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)?.name
+                ?: "外部目录"
+            val path = safTreeToPath(uri) ?: uri.toString()
+            val ok = StorageBook.addLocal(name, path, uri.toString())
+            Toast.makeText(
+                context,
+                if (ok) "已添加 $name" else "该目录已在列表中",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
     // 从压缩包内打开文件时记住来源，关掉查看器/编辑器后回到原来的压缩包位置
     var archiveReturn by remember { mutableStateOf<ArchiveReturn?>(null) }
     var archivePrefix by remember { mutableStateOf("") }
@@ -451,18 +486,19 @@ fun MainScreen(
         drawerContent = {
             val store by StorageBook.config.collectAsStateWithLifecycle()
             ModalDrawerSheet(
-                drawerContainerColor = SunColors.Bg,
+                drawerContainerColor = SunColors.TopBar,
                 drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
                 modifier = Modifier.width(318.dp)
             ) {
                 SidebarContent(
                     currentPath = pane.path,
-                    version = BuildConfig.VERSION_NAME,
                     dark = darkNow,
                     themeMode = prefs.themeMode,
                     locals = store.locals,
                     networks = store.networks,
-                    groups = store.groups,
+                    bookmarks = prefs.bookmarks,
+                    showBookmarks = prefs.sidebarBookmarks,
+                    tools = AppTool.resolve(prefs.sidebarTools),
                     onNavigate = { path ->
                         vm.navigate(path)
                         page = Page.Files
@@ -477,38 +513,36 @@ fun MainScreen(
                     onFollowSystem = {
                         vm.prefsStore.setThemeMode(com.suibian.sunfile.ui.theme.ThemeMode.SYSTEM)
                     },
-                    onAddLocal = { storeDialog = StorageDialog.AddLocal },
+                    onAddLocal = { folderPicker.launch(null) },
                     onAddNetwork = { storeDialog = StorageDialog.AddNetwork },
-                    onAddGroup = { storeDialog = StorageDialog.AddGroup },
                     onManageGroups = { storeDialog = StorageDialog.ManageGroups },
+                    onManageTools = { toolPicker = true },
                     onSettings = { page = Page.Settings; scope.launch { drawerState.close() } },
                     onOpenTool = { tool ->
-                        page = when (tool) {
-                            SideTool.PLUGINS -> Page.Plugins
-                            SideTool.REMOTE -> Page.Remote
-                            SideTool.APPS -> Page.Apps
-                            SideTool.EDITOR -> {
-                                val tmp = File(context.cacheDir, "未命名-${System.currentTimeMillis() / 1000}.txt")
-                                runCatching { tmp.createNewFile() }
-                                editorOrigin = Offset.Zero
-                                editorTarget = tmp
-                                Page.Files
+                        if (tool == AppTool.EDITOR) {
+                            val tmp = File(context.cacheDir, "未命名-${System.currentTimeMillis() / 1000}.txt")
+                            runCatching { tmp.createNewFile() }
+                            editorOrigin = Offset.Zero
+                            editorTarget = tmp
+                            page = Page.Files
+                        } else {
+                            page = when (tool) {
+                                AppTool.PLUGINS -> Page.Plugins
+                                AppTool.TERMINAL -> Page.Terminal
+                                AppTool.REMOTE -> Page.Remote
+                                AppTool.APPS -> Page.Apps
+                                AppTool.MCP -> Page.Mcp
+                                AppTool.COLOR -> Page.ColorPick
+                                AppTool.SIGN -> Page.Signing
+                                AppTool.SMALI -> Page.SmaliRef
+                                AppTool.PASSWORD -> Page.Passwords
+                                AppTool.MUSIC -> Page.Music
+                                AppTool.STREAM -> Page.Stream
+                                AppTool.PAYLOAD -> Page.Payload
+                                AppTool.SYSINFO -> Page.SysInfo
+                                AppTool.TRASH -> Page.Trash
+                                AppTool.EDITOR -> Page.Files
                             }
-                            SideTool.TERMINAL -> Page.Terminal
-                            SideTool.MCP -> Page.Mcp
-                            SideTool.MORE -> Page.Files
-                        }
-                        scope.launch { drawerState.close() }
-                    },
-                    onOpenMore = { tool ->
-                        page = when (tool) {
-                            MoreTool.COLOR -> Page.ColorPick
-                            MoreTool.SIGN -> Page.Signing
-                            MoreTool.SMALI -> Page.SmaliRef
-                            MoreTool.PASSWORD -> Page.Passwords
-                            MoreTool.MUSIC -> Page.Music
-                            MoreTool.STREAM -> Page.Stream
-                            MoreTool.PAYLOAD -> Page.Payload
                         }
                         scope.launch { drawerState.close() }
                     },
@@ -517,7 +551,12 @@ fun MainScreen(
                         scope.launch { drawerState.close() }
                     },
                     onRemoveLocal = { StorageBook.removeLocal(it) },
-                    onRemoveNetwork = { StorageBook.removeNetwork(it) }
+                    onRemoveNetwork = { StorageBook.removeNetwork(it.uri) },
+                    onOpenBookmark = { path ->
+                        vm.navigate(path)
+                        page = Page.Files
+                        scope.launch { drawerState.close() }
+                    }
                 )
             }
         }
@@ -641,7 +680,13 @@ fun MainScreen(
 
                     Page.Search -> Unit
 
-                    Page.Terminal -> TerminalPage(onBack = { page = Page.Files })
+                    Page.Terminal -> TerminalPage(
+                        onBack = { page = Page.Files },
+                        onOpenPath = { path ->
+                            vm.navigate(path)
+                            page = Page.Files
+                        }
+                    )
 
                     Page.Changelog -> ChangelogPage(onBack = { page = Page.Settings })
 
@@ -668,13 +713,13 @@ fun MainScreen(
 
                     Page.SysInfo -> SystemInfoPage(onBack = { page = Page.Files })
 
-                    Page.Plugins -> PluginPage(onBack = { page = Page.Settings })
+                    Page.Plugins -> PluginPage(onBack = { page = Page.Files }, onMtPlugins = { page = Page.MtPlugins })
 
                     Page.Mcp -> McpPage(onBack = { page = Page.Settings })
 
                     Page.Inspect -> InspectPage(onBack = { page = Page.Settings })
 
-                    Page.MtPlugins -> MtPluginPage(onBack = { page = Page.Settings })
+                    Page.MtPlugins -> MtPluginPage(onBack = { page = Page.Plugins })
 
                     Page.Apps -> AppsPage(onBack = { page = Page.Files })
 
@@ -707,17 +752,8 @@ fun MainScreen(
 
                     Page.Settings -> SettingsPage(
                         prefs = prefs,
-                        showHidden = prefs.showHidden,
+                        apply = { block -> vm.updatePrefs(block) },
                         onBack = { page = Page.Files },
-                        onToggleHidden = { vm.toggleHidden() },
-                        onSort = { sheet = SheetKind.Sort },
-                        onToggleAutoCheck = { vm.toggleAutoCheck() },
-                        onToggleAccelerator = { vm.toggleAccelerator() },
-                        onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
-                        onEditorPrefs = { size, wrap, lines, comp -> vm.setEditorPrefs(size, wrap, lines, comp) },
-                        onThemeChange = { vm.prefsStore.setThemeMode(it) },
-                        onClearOpenWith = { vm.prefsStore.clearOpenWith() },
-                        onClearRecent = { vm.prefsStore.clearRecent() },
                         onRequestRoot = {
                             scope.launch {
                                 val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -725,22 +761,77 @@ fun MainScreen(
                                 }
                                 Toast.makeText(
                                     context,
-                                    if (ok) "已获得 Root，可访问全部目录" else "未获得 Root，系统目录仍受限",
+                                    if (ok) "已获得 Root" else "未获得 Root",
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 vm.refreshAll()
                             }
                         },
-                        onAbout = { dialog = DialogKind.About },
-                        dataDir = remember { runCatching { com.suibian.sunfile.data.Mt2.root(context).absolutePath }.getOrDefault("") },
-                        onOpenWithManager = { sheet = SheetKind.OpenWithManager },
+                        onRequestShizuku = {
+                            when {
+                                !com.suibian.sunfile.data.ShizukuBridge.installed(context) ->
+                                    Toast.makeText(context, "请先安装 Shizuku", Toast.LENGTH_SHORT).show()
+                                !com.suibian.sunfile.data.ShizukuBridge.running() ->
+                                    Toast.makeText(context, "请先在 Shizuku 里启动服务", Toast.LENGTH_SHORT).show()
+                                !com.suibian.sunfile.data.ShizukuBridge.permitted() ->
+                                    com.suibian.sunfile.data.ShizukuBridge.requestPermission()
+                                else -> scope.launch {
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.suibian.sunfile.data.Shell.requestShizuku()
+                                    }
+                                    vm.refreshAll()
+                                }
+                            }
+                        },
+                        onInstallShizuku = {
+                            val pkg = com.suibian.sunfile.data.ShizukuBridge.PACKAGE
+                            val launched = runCatching {
+                                val i = context.packageManager.getLaunchIntentForPackage(pkg)
+                                if (i != null) {
+                                    context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                    true
+                                } else false
+                            }.getOrDefault(false)
+                            if (!launched) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                        },
+                        onCheckUpdate = { updateVm.check(silent = false, useAccelerator = prefs.useAccelerator) },
                         onChangelog = { page = Page.Changelog },
+                        onAbout = { dialog = DialogKind.About },
+                        onOpenSource = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/suibian-sun/SunDocument")
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        },
+                        onThanks = { dialog = DialogKind.About },
+                        onAppInfo = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.parse("package:${context.packageName}")
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        },
                         onTrash = { page = Page.Trash },
-                        onHtmlMode = { vm.prefsStore.setHtmlMode(it) },
-                        onPlugins = { page = Page.Plugins },
-                        onMcp = { page = Page.Mcp },
-                        onInspect = { page = Page.Inspect },
-                        onMtPlugins = { page = Page.MtPlugins }
+                        dataDir = remember {
+                            runCatching { com.suibian.sunfile.data.Mt2.root(context).absolutePath }
+                                .getOrDefault("")
+                        }
                     )
                 }
             }
@@ -1222,6 +1313,18 @@ fun MainScreen(
         }
     }
 
+    // 侧边栏工具管理
+    if (toolPicker) {
+        ToolPickerDialog(
+            selected = prefs.sidebarTools.ifEmpty { AppTool.DEFAULTS.map { it.id } },
+            onDismiss = { toolPicker = false },
+            onConfirm = { ids ->
+                vm.prefsStore.setSidebarTools(ids)
+                toolPicker = false
+            }
+        )
+    }
+
     // 侧边栏：添加存储 / 分组管理
     storeDialog?.let { kind ->
         val store by StorageBook.config.collectAsStateWithLifecycle()
@@ -1332,6 +1435,7 @@ fun MainScreen(
             state = searchState,
             history = prefs.recentSearches,
             favorites = prefs.searchFavorites,
+            showFavorites = prefs.inputFavorites,
             onDismiss = { searchOpen = false },
             onQueryChange = { vm.updateQuery(it) },
             onOptionsChange = { vm.setSearchOptions(it) },
@@ -1609,6 +1713,18 @@ private fun FilesPage(
             onToggleBookmark = onToggleBookmark
         )
 
+        // 顶栏下沿的柔和投影：工具栏压在内容之上，而不是和内容拼成一块
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(9.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(SunColors.TopBar.copy(alpha = 0.42f), Color.Transparent)
+                    )
+                )
+        )
+
         // 过滤状态条：只在生效时出现，一行说清过滤条件与剩余数量
         AnimatedVisibility(visible = pane.filter.isNotBlank(), enter = fadeIn(tween(Motion.Fast)), exit = fadeOut(tween(Motion.Fast))) {
             Row(
@@ -1660,7 +1776,6 @@ private fun FilesPage(
                 onUp = { onUp(0) },
                 onRefresh = { onRefresh(0) }
             )
-            PaneDivider()
             PaneView(
                 index = 1,
                 pane = panes[1],
@@ -1677,6 +1792,18 @@ private fun FilesPage(
                 onRefresh = { onRefresh(1) }
             )
         }
+
+        // 底栏上沿同理：内容淡出到底栏，工具栏是浮在最上面的一层
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(9.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, SunColors.Surface1.copy(alpha = 0.45f))
+                    )
+                )
+        )
 
         BottomBar(
             selectionMode = pane.selectionMode,
@@ -1948,6 +2075,25 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
     }
 }
 
+// ---------------- 列表样式 ----------------
+
+/** 列表外观设置：行高、文件名行数、时间格式。用 state 承载，改设置后列表立即重绘 */
+data class ListStyle(
+    val rowHeight: androidx.compose.ui.unit.Dp = Mt.RowHeight,
+    val nameLines: Int = 1,
+    val dateFormat: String = "yy-MM-dd HH:mm",
+    val timeByCreated: Boolean = false
+)
+
+private object ListStyleHolder {
+    var style by mutableStateOf(ListStyle())
+}
+
+/** 底栏下边距：为全面屏手势区留出的额外空间 */
+private object BottomBarStyle {
+    var extra by mutableStateOf(0.dp)
+}
+
 // ---------------- 单栏 ----------------
 
 /**
@@ -1976,11 +2122,15 @@ private fun PaneView(
     onUp: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    // 聚焦栏用底色区分：暗色下抬一层（Surface1 比 Bg 亮 ~3%），亮色下压一层（Surface2 微灰），不靠彩色线条
+    // 没有分割线：聚焦的一栏抬到 Surface1，另一栏留在底色上或压到 Surface2，
+    // 两栏之间靠明度差与边缘光分开，看起来像前后两个平面而不是一张纸上的两格。
+    val dark = SunColors.dark
     val bg by animateColorAsState(
-        targetValue = if (active) {
-            if (SunColors.dark) SunColors.Surface1 else SunColors.Surface2
-        } else Color.Transparent,
+        targetValue = when {
+            active -> SunColors.Surface1
+            dark -> Color.Transparent
+            else -> SunColors.Surface2
+        },
         animationSpec = tween(Motion.Slow, easing = Motion.EaseOut),
         label = "paneBg"
     )
@@ -1994,6 +2144,39 @@ private fun PaneView(
         modifier
             .fillMaxHeight()
             .background(bg)
+            // 边缘高光 + 内侧微阴影：给聚焦栏做出「被托起来」的厚度
+            .drawBehind {
+                if (!active) return@drawBehind
+                val edge = 3.dp.toPx()
+                if (dark) {
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(Color(0x16FFFFFF), Color.Transparent), 0f, edge
+                        )
+                    )
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(Color.Transparent, Color(0x16FFFFFF)), size.width - edge, size.width
+                        )
+                    )
+                    drawRect(
+                        Brush.verticalGradient(
+                            listOf(Color(0x12FFFFFF), Color.Transparent), 0f, 2.dp.toPx()
+                        )
+                    )
+                } else {
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(Color(0x0F000000), Color.Transparent), 0f, edge
+                        )
+                    )
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(Color.Transparent, Color(0x0F000000)), size.width - edge, size.width
+                        )
+                    )
+                }
+            }
             // 手指进入或按下即聚焦该栏，不消费事件，子项点击照常
             .pointerInput(index) {
                 awaitPointerEventScope {
@@ -2291,6 +2474,7 @@ private fun FileRow(
     onClick: (Offset) -> Unit,
     onLongClick: (Offset) -> Unit
 ) {
+    val style = ListStyleHolder.style
     val interaction = remember { MutableInteractionSource() }
     var rowOrigin by remember { mutableStateOf(Offset.Zero) }
     val bg by animateColorAsState(
@@ -2301,7 +2485,7 @@ private fun FileRow(
     Row(
         modifier
             .fillMaxWidth()
-            .height(Mt.RowHeight)
+            .height(style.rowHeight)
             .background(bg)
             .onGloballyPositioned { coords ->
                 val pos = coords.localToRoot(Offset.Zero)
@@ -2334,16 +2518,18 @@ private fun FileRow(
                 },
                 fontSize = Mt.Name,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
+                maxLines = style.nameLines,
+                lineHeight = (Mt.Name.value + 3).sp,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(2.dp))
+            val stamp = if (style.timeByCreated && entry.created > 0) entry.created else entry.lastModified
             Text(
                 if (entry.isDir) {
-                    Fmt.timeShort(entry.lastModified)
+                    Fmt.timeAs(stamp, style.dateFormat)
                 } else {
                     // MT 的顺序：先时间后大小，扫一眼就能比出「什么时候、多大」
-                    Fmt.timeShort(entry.lastModified) + " " + Fmt.sizeCompact(entry.size)
+                    Fmt.timeAs(stamp, style.dateFormat) + " " + Fmt.sizeCompact(entry.size)
                 },
                 color = SunColors.TextTertiary,
                 fontSize = Mt.Meta,
@@ -2410,6 +2596,7 @@ private fun BottomBar(
                 )
             }
             .animateContentSize()
+            .padding(bottom = BottomBarStyle.extra)
             // 从底栏上滑打开书签，与 MT 一致；不消费事件，图标点击照常
             .pointerInput(Unit) {
                 val threshold = 22.dp.toPx()
@@ -2593,6 +2780,20 @@ private fun BusyBar(op: com.suibian.sunfile.vm.OpState, modifier: Modifier = Mod
 }
 
 // ---------------- 工具函数 ----------------
+
+/** content:// tree uri 的 documentId 形如 primary:DCIM，翻译成真实路径 */
+private fun safTreeToPath(uri: android.net.Uri): String? {
+    val id = runCatching {
+        android.provider.DocumentsContract.getTreeDocumentId(uri)
+    }.getOrNull() ?: return null
+    val parts = id.split(":", limit = 2)
+    val rel = parts.getOrElse(1) { "" }
+    val base = when (parts[0]) {
+        "primary" -> "/storage/emulated/0"
+        else -> "/storage/${parts[0]}"
+    }
+    return (if (rel.isBlank()) base else "$base/$rel").trimEnd('/').ifBlank { base }
+}
 
 /** smb / ftp / webdav 这些自定义 scheme 系统浏览器认不出，转成可打开的等价链接 */
 private fun normalizeLink(uri: String): String {

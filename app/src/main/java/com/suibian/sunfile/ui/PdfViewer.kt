@@ -87,12 +87,13 @@ fun PdfViewerOverlay(file: File, onClose: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(SunColors.Bg).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(SunColors.Bg).navigationBarsPadding()) {
         androidx.compose.foundation.layout.Row(
             Modifier
                 .fillMaxWidth()
+                .background(SunColors.TopBar)
+                .statusBarsPadding()
                 .height(Mt.BarHeight)
-                .background(SunColors.Surface1)
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -100,14 +101,14 @@ fun PdfViewerOverlay(file: File, onClose: () -> Unit) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     "返回",
-                    tint = SunColors.TextPrimary,
+                    tint = SunColors.OnTopBar,
                     modifier = Modifier.size(21.dp)
                 )
             }
             Column(Modifier.weight(1f)) {
                 Text(
                     file.name,
-                    color = SunColors.TextPrimary,
+                    color = SunColors.OnTopBar,
                     fontSize = 16.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,

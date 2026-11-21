@@ -59,6 +59,20 @@ object Fmt {
     fun timeShort(millis: Long): String =
         if (millis <= 0) "-" else shortTime.get()!!.format(Date(millis))
 
+    /** 按用户设置的模式格式化；格式串非法时回退到默认，绝不让列表崩掉 */
+    private val customTime = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue() = SimpleDateFormat("yy-MM-dd HH:mm", Locale.getDefault())
+    }
+
+    fun timeAs(millis: Long, pattern: String): String {
+        if (millis <= 0) return "-"
+        return runCatching {
+            val f = customTime.get()!!
+            if (f.toPattern() != pattern) f.applyPattern(pattern)
+            f.format(Date(millis))
+        }.getOrElse { timeShort(millis) }
+    }
+
     fun speed(bytesPerSec: Long): String = size(bytesPerSec) + "/s"
 
     fun duration(seconds: Long): String {

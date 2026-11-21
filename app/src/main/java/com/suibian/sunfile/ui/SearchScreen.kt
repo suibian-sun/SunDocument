@@ -100,6 +100,7 @@ fun SearchDialog(
     state: SearchUiState,
     history: List<String>,
     favorites: List<String>,
+    showFavorites: Boolean = true,
     onDismiss: () -> Unit,
     onQueryChange: (String) -> Unit,
     onOptionsChange: (FileRepo.SearchOptions) -> Unit,
@@ -161,35 +162,38 @@ fun SearchDialog(
                 // ---------- 顶部：标题 + 我的收藏 ----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("搜索", color = SunColors.TextPrimary, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(if (favoriteMode) SunColors.AccentSoft else Color.Transparent)
-                            .clickable {
-                                favoriteMode = !favoriteMode
-                                if (!favoriteMode) managing = false
-                            }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (favoriteMode) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                            null,
-                            tint = if (favoriteMode) SunColors.Accent else SunColors.TextSecondary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "我的收藏",
-                            color = if (favoriteMode) SunColors.Accent else SunColors.TextSecondary,
-                            fontSize = 11.5.sp
-                        )
+                    // 收藏功能关掉后这里整块不出现，输入框仍然可用
+                    if (showFavorites) {
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (favoriteMode) SunColors.AccentSoft else Color.Transparent)
+                                .clickable {
+                                    favoriteMode = !favoriteMode
+                                    if (!favoriteMode) managing = false
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (favoriteMode) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                                null,
+                                tint = if (favoriteMode) SunColors.Accent else SunColors.TextSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                "我的收藏",
+                                color = if (favoriteMode) SunColors.Accent else SunColors.TextSecondary,
+                                fontSize = 11.5.sp
+                            )
+                        }
                     }
                 }
 
                 Spacer(Modifier.height(10.dp))
 
-                if (favoriteMode) {
+                if (favoriteMode && showFavorites) {
                     // ---------- 收藏面板 ----------
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(

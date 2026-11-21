@@ -120,13 +120,13 @@ fun InspectPage(onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(SunColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(Mt.BarHeight).background(SunColors.Surface1).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.TextPrimary, modifier = Modifier.size(21.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = SunColors.OnTopBar, modifier = Modifier.size(21.dp))
             }
-            Text("界面分析", color = SunColors.TextPrimary, fontSize = 16.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text("界面分析", color = SunColors.OnTopBar, fontSize = 16.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             if (nodes != null) {
                 Text(
                     "复制",
