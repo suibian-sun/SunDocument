@@ -27,6 +27,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -173,6 +174,9 @@ import com.suibian.sunfile.ui.theme.Mt
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
+import com.suibian.sunfile.ui.theme.SunSkin
+import com.suibian.sunfile.ui.theme.DividerMode
+import com.suibian.sunfile.ui.theme.PressMode
 import com.suibian.sunfile.update.UpdateState
 import com.suibian.sunfile.update.UpdateViewModel
 import com.suibian.sunfile.util.Fmt
@@ -2554,36 +2558,73 @@ private fun FileRow(
     onLongClick: (Offset) -> Unit
 ) {
     val style = ListStyleHolder.style
+    val skin = SunSkin
+    val hairline = SunColors.Hairline
+    val accent = SunColors.Accent
     val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
     var rowOrigin by remember { mutableStateOf(Offset.Zero) }
     val bg by animateColorAsState(
-        targetValue = if (selected) SunColors.AccentSoft else Color.Transparent,
+        targetValue = when {
+            selected -> SunColors.AccentSoft
+            // 高亮模板不扩散水波纹，按压时整行压暗一层，更接近像素级管理器的手感
+            skin.press == PressMode.TINT && pressed -> SunColors.Surface3
+            else -> Color.Transparent
+        },
         animationSpec = tween(Motion.Fast),
         label = "rowBg"
     )
+    val ripple = if (skin.press == PressMode.RIPPLE) LocalIndication.current else null
+    val insetStart = skin.rowGutter + skin.rowIcon + 11.dp
     Row(
         modifier
             .fillMaxWidth()
             .height(style.rowHeight)
             .background(bg)
+            .drawBehind {
+                // 分割线画在行内侧底边：不占布局高度，密度切换时行高不会被撑开
+                val t = 0.6.dp.toPx()
+                val y = size.height - t / 2f
+                when (skin.divider) {
+                    DividerMode.EDGE -> drawLine(hairline, Offset(0f, y), Offset(size.width, y), t)
+                    DividerMode.INSET -> drawLine(
+                        hairline,
+                        Offset(insetStart.toPx(), y),
+                        Offset(size.width, y),
+                        t
+                    )
+                    DividerMode.NONE -> Unit
+                }
+                // 选中态左侧竖条：比整行填色更省视觉预算，扫读时也能一眼定位
+                if (skin.selectionBar && selected) {
+                    val w = 2.dp.toPx()
+                    val h = size.height - 12.dp.toPx()
+                    drawRoundRect(
+                        color = accent,
+                        topLeft = Offset(0f, (size.height - h) / 2f),
+                        size = androidx.compose.ui.geometry.Size(w, h),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2f)
+                    )
+                }
+            }
             .onGloballyPositioned { coords ->
                 val pos = coords.localToRoot(Offset.Zero)
                 rowOrigin = Offset(pos.x + 40f, pos.y + coords.size.height / 2f)
             }
-            .pressScale(interaction, 0.985f)
+            .pressScale(interaction, if (skin.press == PressMode.SCALE) 0.985f else 1f)
             .combinedClickable(
                 interactionSource = interaction,
-                indication = LocalIndication.current,
+                indication = ripple,
                 onLongClick = { onLongClick(rowOrigin) },
                 onClick = { onClick(rowOrigin) }
             )
-            .padding(start = Mt.RowGutter, end = 8.dp),
+            .padding(start = skin.rowGutter, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         FileTypeBadge(
             file = entry.file,
             isDir = entry.isDir,
-            size = Mt.RowIcon,
+            size = skin.rowIcon,
             modifier = Modifier.alpha((if (entry.canRead) 1f else 0.45f) * alpha)
         )
         Spacer(Modifier.width(11.dp))
@@ -2595,10 +2636,11 @@ private fun FileRow(
                     !entry.canRead -> SunColors.TextTertiary
                     else -> SunColors.TextPrimary
                 },
-                fontSize = Mt.Name,
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                fontSize = skin.nameSize,
+                fontWeight = if (selected) FontWeight.Medium else skin.nameWeight,
+                letterSpacing = skin.letterGap,
                 maxLines = style.nameLines,
-                lineHeight = (Mt.Name.value + 3).sp,
+                lineHeight = (skin.nameSize.value + 3).sp,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(2.dp))
@@ -2611,7 +2653,10 @@ private fun FileRow(
                     Fmt.timeAs(stamp, style.dateFormat) + " " + Fmt.sizeCompact(entry.size)
                 },
                 color = SunColors.TextTertiary,
-                fontSize = Mt.Meta,
+                fontSize = skin.meta,
+                // 纸墨模板用等宽元信息：时间与大小按列对齐，扫读时不用逐字比长度
+                fontFamily = if (skin.metaMono) FontFamily.Monospace else FontFamily.Default,
+                letterSpacing = if (skin.metaMono) 0.sp else 0.05.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

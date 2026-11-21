@@ -86,6 +86,19 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 | 搜索 | **弹窗内**按名称或按内容搜索：内容模式给出「文件 + 行号 + 该行片段」，点击直接打开并定位到该行 |
 | 分享 / 复制路径 | FileProvider 分享，避免暴露 `file://` |
 
+### 界面模板
+
+设置 → 外观 → 界面模板，四套模板改的是同一批决策，不是换配色：
+
+| 模板 | 行高 | 形状 | 分割线 | 图标 | 适合 |
+| --- | --- | --- | --- | --- | --- |
+| 经典 | 48dp | 直角（弹窗 2dp） | 内缩细线 | 分类型 | 一屏看最多条目 |
+| 层级 | 52dp | 中圆角 | 无 | 单色 | 长时间翻阅，靠光影分层 |
+| 纸墨 | 54dp | 近直角 | 通栏细线 | 单色 | 代码、日志、清单，元信息等宽对齐 |
+| 柔和 | 58dp | 大圆角 | 无 | 分类型 | 触屏优先，卡片式 |
+
+模板是数据（`SkinSpec`），页面只读不用自己定像素。切换时会重建整棵树，保证每一行、每个弹窗都拿到新尺寸。
+
 ### 网络存储
 
 侧边栏「网络存储」点开即进入内置浏览页，六种协议都有真实客户端，不依赖系统里装没装对应 App：
@@ -325,7 +338,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.9.0 -PappVersionCode=27
+./gradlew assembleRelease -PappVersionName=1.9.1 -PappVersionCode=28
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -336,7 +349,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.9.0 && git push origin v1.9.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.9.1 && git push origin v1.9.1`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -373,6 +386,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.9.1 | 界面模板系统：四套可切换样式（经典 / 层级 / 纸墨 / 柔和），密度、圆角、字号、分割线、按压反馈、图标着色全部由模板驱动；选中行加左侧竖条 |
 | 1.9.0 | 六种网络协议内置客户端（FTP/FTPS/SFTP/SMB/WebDAV/S3）与远程浏览页；终端重写为 VT100/xterm 模拟器；新增「本地」shell 引擎，无需授权即可读根目录与系统分区；安装四通道接线；书签上滑分左右 |
 | 1.8.0 | 去分割线改用层级与光影；侧边栏同顶栏配色、三区块可折叠；本地存储走系统目录选择器，网络存储支持六种协议；设置页重写为九分类并全部接线；插件入口合并 |
 | 1.7.1 | 接入 Shizuku 引擎：文件操作代理给 shell 进程执行，可读根目录、/system、/vendor；Shizuku / Root / 普通 API 三条通道自动选路 |

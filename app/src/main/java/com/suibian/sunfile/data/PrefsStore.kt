@@ -35,6 +35,8 @@ data class AppPrefs(
     // ---------- 外观 ----------
     /** 主题色覆盖，0 表示跟随内置色板 */
     val accentColor: Long = 0L,
+    /** 界面模板：classic / slate / paper / soft，决定密度、圆角、分割线与字号 */
+    val skinId: String = "classic",
     /** -1 紧凑 / 0 标准 / 1 宽松 */
     val fileListSize: Int = 0,
     val fileNameMaxLines: Int = 1,
@@ -146,6 +148,7 @@ class PrefsStore private constructor(context: Context) {
         autoStartService = sp.getBoolean("auto_start_service", true),
 
         accentColor = sp.getLong("accent_color", 0L),
+        skinId = sp.getString("skin_id", "classic") ?: "classic",
         fileListSize = sp.getInt("file_list_size", 0),
         fileNameMaxLines = sp.getInt("file_name_lines", 1).coerceIn(1, 3),
         timeByCreated = sp.getBoolean("time_by_created", false),
@@ -377,6 +380,7 @@ class PrefsStore private constructor(context: Context) {
             .putString("start_right", p.startPathRight)
             .putBoolean("auto_start_service", p.autoStartService)
             .putLong("accent_color", p.accentColor)
+            .putString("skin_id", p.skinId)
             .putInt("file_list_size", p.fileListSize)
             .putInt("file_name_lines", p.fileNameMaxLines)
             .putBoolean("time_by_created", p.timeByCreated)

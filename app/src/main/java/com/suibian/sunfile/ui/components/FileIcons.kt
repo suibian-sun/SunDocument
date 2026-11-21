@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import com.suibian.sunfile.data.FileKind
 import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.ui.theme.SunColors
+import com.suibian.sunfile.ui.theme.SunSkin
+import com.suibian.sunfile.ui.theme.IconTintMode
 import java.io.File
 
 /** 其它地方仍按类型取线性图标 */
@@ -71,6 +73,10 @@ private val CODE_EXT = setOf(
 
 @Composable
 fun tintOf(file: File, isDir: Boolean = file.isDirectory): Color {
+    // 单色模板：图标统一成灰度，只靠字形区分类型，列表更安静
+    if (SunSkin.iconTint == IconTintMode.MONO) {
+        return if (isDir) SunColors.TextSecondary else SunColors.File
+    }
     if (isDir) return SunColors.Folder
     return extColor(FileKinds.extensionOf(file), FileKinds.kindOf(file))
 }

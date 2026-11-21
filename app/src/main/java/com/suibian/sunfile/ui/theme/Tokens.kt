@@ -4,7 +4,6 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -13,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -189,47 +190,72 @@ object Motion {
     )
 }
 
-object SunShapes {
-    val Small = RoundedCornerShape(8.dp)
-    val Medium = RoundedCornerShape(14.dp)
-    val Large = RoundedCornerShape(20.dp)
-    val Sheet = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-    val Pill = RoundedCornerShape(50)
+/**
+ * 形状与度量的当前模板。
+ *
+ * 这里用「可绑定的全局只读视图」而不是 CompositionLocal 直取，原因有二：
+ * 1. `Modifier.clip(SunShapes.Small)` 这类调用散落在 80 多处，很多在非
+ *    @Composable 的普通函数里，改成 composable getter 会连锁改一大片；
+ * 2. 模板切换只会发生在主题重建时，`SunDocumentTheme` 先于子组件执行，
+ *    绑定新模板后整棵子树重组，读到的自然就是新值。
+ */
+private object SkinHolder {
+    @Volatile
+    var spec: SkinSpec = Skins.Classic
+}
 
-    /** MT 的弹窗几乎是直角，只有 2dp 的收边 */
-    val Dialog = RoundedCornerShape(3.dp)
-    /** 打开方式里的彩色方块 */
-    val Tile = RoundedCornerShape(15.dp)
+/** 当前模板（需要读更多字段时用这个） */
+val LocalSkin = staticCompositionLocalOf { Skins.Classic }
+
+/** 取当前模板，等价于 `LocalSkin.current` */
+val SunSkin: SkinSpec
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalSkin.current
+
+object SunShapes {
+    val Small get() = SkinHolder.spec.small
+    val Medium get() = SkinHolder.spec.medium
+    val Large get() = SkinHolder.spec.large
+    val Sheet get() = SkinHolder.spec.sheet
+    val Pill get() = SkinHolder.spec.pill
+    val Dialog get() = SkinHolder.spec.dialog
+    val Tile get() = SkinHolder.spec.tile
 }
 
 /**
- * MT 管理器的基础度量。
+ * 全站共用的一套度量。
  *
- * 文件列表、顶栏、底栏、全屏页共用同一套数字：一旦各页面自己写字号，
- * 半栏宽度下就会出现「标题不如正文醒目」的错位，所以这里集中一次。
+ * 文件列表、顶栏、底栏、全屏页读的是同一份数字：一旦各页面自己定行高，
+ * 半栏宽度下就会出现「标题不如正文醒目」的错位，所以只在这里定义一次。
  */
 object Mt {
-    val BarHeight = 56.dp
-    val BottomHeight = 50.dp
-    val RowHeight = 50.dp
-    val RowIcon = 30.dp
-    val RowGutter = 12.dp
+    private val s get() = SkinHolder.spec
+
+    val BarHeight get() = s.barHeight
+    val BottomHeight get() = s.bottomHeight
+    val RowHeight get() = s.rowHeight
+    val RowIcon get() = s.rowIcon
+    val RowGutter get() = s.rowGutter
 
     /** 顶栏主标题：路径本身就是这一页的名字 */
-    val Title = 17.sp
+    val Title get() = s.title
     /** 顶栏副标题：文件夹数 / 文件数 / 存储 */
-    val BarMeta = 10.5.sp
+    val BarMeta get() = s.barMeta
     /** 列表行主文字 */
-    val Name = 14.sp
+    val Name get() = s.nameSize
     /** 列表行元信息（时间、大小） */
-    val Meta = 10.sp
+    val Meta get() = s.meta
 
     /** 路径越长标题越小，保证深路径也能读到尾部目录名 */
-    fun titleSize(length: Int): androidx.compose.ui.unit.TextUnit = when {
-        length <= 22 -> 17.sp
-        length <= 30 -> 15.sp
-        length <= 40 -> 13.sp
-        else -> 12.sp
+    fun titleSize(length: Int): androidx.compose.ui.unit.TextUnit {
+        val base = s.title.value
+        return when {
+            length <= 22 -> base.sp
+            length <= 30 -> (base - 2f).sp
+            length <= 40 -> (base - 4f).sp
+            else -> (base - 5f).sp
+        }
     }
 }
 
@@ -259,9 +285,13 @@ val NumberStyle = TextStyle(
 fun SunDocumentTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
     accent: Long = 0L,
+    skinId: String = Skins.Classic.id,
     content: @Composable () -> Unit
 ) {
     val dark = mode.isDark(isSystemInDarkTheme())
+    val skin = remember(skinId) { Skins.byId(skinId) }
+    // 先绑定模板，再渲染子树：任何一处读 SunShapes / Mt 都是新值
+    SkinHolder.spec = skin
     val base = if (dark) DarkPalette else LightPalette
     // 用户在设置里挑了主题色就替换强调色，其余语义色不动
     val palette = if (accent != 0L) {
@@ -309,11 +339,22 @@ fun SunDocumentTheme(
             onError = Color.White
         )
     }
-    CompositionLocalProvider(LocalSunPalette provides palette) {
+    CompositionLocalProvider(LocalSunPalette provides palette, LocalSkin provides skin) {
         MaterialTheme(
             colorScheme = scheme,
             typography = SunTypography,
-            content = content
+            shapes = MaterialTheme.shapes.copy(
+                extraSmall = skin.small,
+                small = skin.small,
+                medium = skin.medium,
+                large = skin.large,
+                extraLarge = skin.sheet
+            ),
+            content = {
+                // 换模板时整棵子树重建：SunShapes / Mt 是全局只读视图，
+                // 被跳过的子树不会自己重读，用 key 保证新形状一定落到每一行上。
+                key(skin.id) { content() }
+            }
         )
     }
 }

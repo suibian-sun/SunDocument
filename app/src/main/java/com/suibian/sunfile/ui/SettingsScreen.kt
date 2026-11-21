@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
@@ -163,6 +164,7 @@ fun SettingsPage(
             Category("外观")
             ThemeSegmented(prefs.themeMode) { mode -> apply { it.copy(themeMode = mode) } }
             AccentRow(prefs.accentColor) { color -> apply { it.copy(accentColor = color) } }
+            SkinRow(prefs.skinId) { id -> apply { it.copy(skinId = id) } }
             ValueRow(
                 "文件列表大小",
                 when (prefs.fileListSize) {
@@ -578,6 +580,98 @@ private fun InfoRow(title: String, subtitle: String) {
                 lineHeight = 15.sp,
                 modifier = Modifier.padding(top = 3.dp)
             )
+        }
+    }
+}
+
+
+/**
+ * 界面模板选择：四套模板差异在密度、圆角、分割线与字号上，
+ * 光看名字体会不到，所以每一项左边给一个按该模板行高压缩的缩略预览。
+ */
+@Composable
+private fun SkinRow(current: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    ValueRow("界面模板", com.suibian.sunfile.ui.theme.Skins.byId(current).name) { open = true }
+    if (!open) return
+    AlertDialog(
+        onDismissRequest = { open = false },
+        containerColor = SunColors.Surface2,
+        shape = SunShapes.Dialog,
+        title = { Text("界面模板", color = SunColors.TextPrimary, fontSize = 15.sp) },
+        text = {
+            Column {
+                com.suibian.sunfile.ui.theme.Skins.all.forEach { s ->
+                    val on = s.id == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(SunShapes.Small)
+                            .background(if (on) SunColors.AccentSoft else Color.Transparent)
+                            .clickable { onPick(s.id); open = false }
+                            .padding(horizontal = 8.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SkinPreview(s)
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                s.name,
+                                color = if (on) SunColors.Accent else SunColors.TextPrimary,
+                                fontSize = 13.5.sp
+                            )
+                            Text(s.note, color = SunColors.TextTertiary, fontSize = 10.sp, maxLines = 1)
+                        }
+                        if (on) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                null,
+                                tint = SunColors.Accent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Text(
+                "完成",
+                color = SunColors.Accent,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clip(SunShapes.Small)
+                    .clickable { open = false }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+    )
+}
+
+@Composable
+private fun SkinPreview(s: com.suibian.sunfile.ui.theme.SkinSpec) {
+    Box(
+        Modifier
+            .size(width = 40.dp, height = 32.dp)
+            .clip(s.small)
+            .background(SunColors.Surface1),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 5.dp)
+        ) {
+            repeat(3) { i ->
+                Box(
+                    Modifier
+                        .fillMaxWidth(if (i == 2) 0.62f else 1f)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(if (i == 0) SunColors.Accent.copy(alpha = 0.65f) else SunColors.Hairline)
+                )
+                if (i < 2) Spacer(Modifier.height((s.rowHeight.value / 15f).dp))
+            }
         }
     }
 }

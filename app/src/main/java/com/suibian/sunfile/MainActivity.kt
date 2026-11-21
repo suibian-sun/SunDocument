@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
                     .isAppearanceLightNavigationBars = !dark
             }
 
-            SunDocumentTheme(mode = prefs.themeMode, accent = prefs.accentColor) {
+            SunDocumentTheme(mode = prefs.themeMode, accent = prefs.accentColor, skinId = prefs.skinId) {
                 var hasAccess by remember { mutableStateOf(Permissions.hasAllFilesAccess(activity)) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
