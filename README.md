@@ -86,6 +86,22 @@ Root 是**手动开启**（设置 → 系统访问 → Root 权限），避免�
 | 搜索 | **弹窗内**按名称或按内容搜索：内容模式给出「文件 + 行号 + 该行片段」，点击直接打开并定位到该行 |
 | 分享 / 复制路径 | FileProvider 分享，避免暴露 `file://` |
 
+### 二次元界面与自定义壁纸
+
+2.0.0 起默认模板是「二次元」：顶栏走樱花粉到薰衣草紫的渐变，面板是带透明度的玻璃，壁纸从底下透出来。
+
+壁纸有三种来源，都在 设置 → 外观 → 壁纸图片：
+
+| 来源 | 怎么填 | 说明 |
+| --- | --- | --- |
+| 本地图片 | 点开直接进系统相册/文件选择器 | 用 SAF 持久授权，重启后仍然有效 |
+| 图片直链 | `https://example.com/a.jpg` | 带查询参数也可以 |
+| 图片 API | `https://api.example.com/random?type=image` | 点「换一张」重新请求，接口需直接返回图片本体 |
+
+模糊半径 0–32dp、遮罩强度 0–70% 可调：壁纸太花就加模糊，文字看不清就加遮罩。图片会按屏幕尺寸采样后缓存到本地，重启不重新下载；Android 12 以下没有高斯模糊，自动降级为雾化（压低不透明度）。
+
+面板透明度是设计的一部分：二次元色板的面颜色留 45%–55% 的透光，所以壁纸能透出来；切回「经典 / 层级 / 纸墨 / 柔和」时色板恢复不透明。
+
 ### 界面模板
 
 设置 → 外观 → 界面模板，四套模板改的是同一批决策，不是换配色：
@@ -338,7 +354,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.9.1 -PappVersionCode=28
+./gradlew assembleRelease -PappVersionName=2.0.0 -PappVersionCode=29
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -349,7 +365,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.9.1 && git push origin v1.9.1`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v2.0.0 && git push origin v2.0.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -386,6 +402,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 2.0.0 | 全局二次元视觉：粉紫渐变顶栏、半透明玻璃面板、大圆角；自定义壁纸支持本地图片 / 图片直链 / 图片 API，可调模糊与遮罩；模板扩到五套 |
 | 1.9.1 | 界面模板系统：四套可切换样式（经典 / 层级 / 纸墨 / 柔和），密度、圆角、字号、分割线、按压反馈、图标着色全部由模板驱动；选中行加左侧竖条 |
 | 1.9.0 | 六种网络协议内置客户端（FTP/FTPS/SFTP/SMB/WebDAV/S3）与远程浏览页；终端重写为 VT100/xterm 模拟器；新增「本地」shell 引擎，无需授权即可读根目录与系统分区；安装四通道接线；书签上滑分左右 |
 | 1.8.0 | 去分割线改用层级与光影；侧边栏同顶栏配色、三区块可折叠；本地存储走系统目录选择器，网络存储支持六种协议；设置页重写为九分类并全部接线；插件入口合并 |

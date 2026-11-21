@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -91,7 +92,7 @@ fun PdfViewerOverlay(file: File, onClose: () -> Unit) {
         androidx.compose.foundation.layout.Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .statusBarsPadding()
                 .height(Mt.BarHeight)
                 .padding(horizontal = 4.dp),

@@ -2,6 +2,8 @@ package com.suibian.sunfile.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
@@ -68,6 +70,7 @@ import kotlinx.coroutines.withContext
 import com.suibian.sunfile.update.ReleaseInfo
 import com.suibian.sunfile.update.UpdateState
 import com.suibian.sunfile.ui.theme.NumberStyle
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 import com.suibian.sunfile.ui.theme.ThemeMode
@@ -104,7 +107,7 @@ fun SettingsPage(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .statusBarsPadding()
                 .height(com.suibian.sunfile.ui.theme.Mt.BarHeight)
                 .padding(horizontal = 4.dp),
@@ -165,6 +168,14 @@ fun SettingsPage(
             ThemeSegmented(prefs.themeMode) { mode -> apply { it.copy(themeMode = mode) } }
             AccentRow(prefs.accentColor) { color -> apply { it.copy(accentColor = color) } }
             SkinRow(prefs.skinId) { id -> apply { it.copy(skinId = id) } }
+            BackdropSection(
+                source = prefs.backdropSource,
+                enabled = prefs.backdropEnabled,
+                blur = prefs.backdropBlur,
+                dim = prefs.backdropDim,
+                anime = prefs.skinId == "anime",
+                onChange = { f -> apply(f) }
+            )
             ValueRow(
                 "文件列表大小",
                 when (prefs.fileListSize) {
@@ -584,6 +595,239 @@ private fun InfoRow(title: String, subtitle: String) {
     }
 }
 
+
+
+/**
+ * 壁纸来源选择。
+ *
+ * 三条路都落到同一个 `backdropSource` 字符串上：本地是 content://，
+ * 网络是 http(s)://。这样加载层不用关心来源类型，设置页也只需要一个字段。
+ */
+@Composable
+private fun BackdropSection(
+    source: String,
+    enabled: Boolean,
+    blur: Int,
+    dim: Int,
+    anime: Boolean,
+    onChange: ((AppPrefs) -> AppPrefs) -> Unit
+) {
+    val context = LocalContext.current
+    var picker by remember { mutableStateOf(false) }
+    var editUrl by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var apiHint by remember { mutableStateOf(false) }
+
+    val docPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            // 拿持久读权限，否则重启后 content:// 就失效了
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            onChange { it.copy(backdropSource = uri.toString(), backdropEnabled = true) }
+        }
+    }
+
+    SwitchRow("壁纸背景", enabled) {
+        onChange { it.copy(backdropEnabled = !it.backdropEnabled) }
+    }
+    if (!anime) {
+        InfoRow("当前模板不透明，壁纸不会显示", "切到「二次元」模板即可看到效果")
+    }
+    ValueRow("壁纸图片", backdropLabel(source)) { picker = true }
+    if (source.isNotBlank()) {
+        ValueRow("壁纸模糊", if (blur <= 0) "关闭" else "$blur dp") {
+            val steps = listOf(0, 8, 12, 18, 24, 32)
+            val next = steps[(steps.indexOf(blur).coerceAtLeast(0) + 1) % steps.size]
+            onChange { it.copy(backdropBlur = next) }
+        }
+        ValueRow("遮罩强度", "$dim%") {
+            val steps = listOf(0, 20, 35, 45, 55, 70)
+            val next = steps[(steps.indexOf(dim).coerceAtLeast(0) + 1) % steps.size]
+            onChange { it.copy(backdropDim = next) }
+        }
+        if (source.startsWith("http", true)) {
+            ActionRow("换一张", "图片 API 每次请求返回不同图") {
+                onChange { it.copy(backdropBust = System.currentTimeMillis()) }
+            }
+        }
+        ActionRow("清除壁纸", "") {
+            onChange { it.copy(backdropSource = "") }
+        }
+    }
+
+    if (picker) {
+        AlertDialog(
+            onDismissRequest = { picker = false },
+            containerColor = SunColors.Surface2,
+            shape = SunShapes.Dialog,
+            title = { Text("壁纸来源", color = SunColors.TextPrimary, fontSize = 15.sp) },
+            text = {
+                Column {
+                    SourceRow("本地图片", "从相册或文件里选一张，长期有效") {
+                        picker = false
+                        docPicker.launch(arrayOf("image/*"))
+                    }
+                    SourceRow("图片链接", "填入 https://…/wallpaper.jpg 这样的直链") {
+                        picker = false
+                        draft = ""
+                        apiHint = false
+                        editUrl = true
+                    }
+                    SourceRow("图片 API", "填入每次请求返回一张图的接口地址") {
+                        picker = false
+                        draft = ""
+                        apiHint = true
+                        editUrl = true
+                    }
+                }
+            },
+            confirmButton = {
+                Text(
+                    "取消",
+                    color = SunColors.TextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { picker = false }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        )
+    }
+
+    if (editUrl) {
+        AlertDialog(
+            onDismissRequest = { editUrl = false },
+            containerColor = SunColors.Surface2,
+            shape = SunShapes.Dialog,
+            title = {
+                Text(
+                    if (apiHint) "图片 API" else "图片链接",
+                    color = SunColors.TextPrimary,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Column {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(SunShapes.Small)
+                            .background(SunColors.Surface3)
+                            .padding(horizontal = 10.dp, vertical = 9.dp)
+                    ) {
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                color = SunColors.TextPrimary,
+                                fontSize = 12.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(SunColors.Accent),
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                if (draft.isEmpty()) {
+                                    Text(
+                                        if (apiHint) "https://api.example.com/random?type=image"
+                                        else "https://example.com/a.jpg",
+                                        color = SunColors.TextTertiary,
+                                        fontSize = 11.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        maxLines = 1
+                                    )
+                                }
+                                inner()
+                            }
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (apiHint) {
+                            "每次点「换一张」都会重新请求一次，返回什么就显示什么。接口需要直接返回图片本体，不能是 JSON 或网页。"
+                        } else {
+                            "支持 http 与 https，也支持带查询参数的地址。图片会缓存到本地，下次启动不用重新下载。"
+                        },
+                        color = SunColors.TextTertiary,
+                        fontSize = 10.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Text(
+                    "使用",
+                    color = if (draft.trim().startsWith("http", true)) SunColors.Accent else SunColors.TextTertiary,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable(enabled = draft.trim().startsWith("http", true)) {
+                            onChange {
+                                it.copy(
+                                    backdropSource = draft.trim(),
+                                    backdropEnabled = true,
+                                    backdropBust = if (apiHint) System.currentTimeMillis() else it.backdropBust
+                                )
+                            }
+                            editUrl = false
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            },
+            dismissButton = {
+                Text(
+                    "取消",
+                    color = SunColors.TextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { editUrl = false }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun SourceRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(SunShapes.Small)
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = SunColors.TextPrimary, fontSize = 13.5.sp)
+            Text(subtitle, color = SunColors.TextTertiary, fontSize = 10.sp, maxLines = 1)
+        }
+        Icon(
+            Icons.Outlined.ArrowForward,
+            null,
+            tint = SunColors.TextTertiary.copy(alpha = 0.6f),
+            modifier = Modifier.size(14.dp)
+        )
+    }
+}
+
+/** 壁纸来源在设置里的人话描述：content:// 太长，只显示来源类型 */
+private fun backdropLabel(source: String): String = when {
+    source.isBlank() -> "未设置"
+    source.startsWith("http", true) -> {
+        val host = runCatching { android.net.Uri.parse(source).host }.getOrNull()
+        if (host.isNullOrBlank()) "图片链接" else host
+    }
+    else -> "本地图片"
+}
 
 /**
  * 界面模板选择：四套模板差异在密度、圆角、分割线与字号上，

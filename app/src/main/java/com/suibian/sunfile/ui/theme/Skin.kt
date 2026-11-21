@@ -82,10 +82,47 @@ data class SkinSpec(
     val letterGap: TextUnit,
     val metaMono: Boolean,
     /** 选中行左侧的强调竖条 */
-    val selectionBar: Boolean
+    val selectionBar: Boolean,
+    /** 使用二次元半透明色板（面颜色带透明度，壁纸从底下透出） */
+    val anime: Boolean = false
 )
 
 object Skins {
+
+    /**
+     * 二次元：玻璃面板 + 大圆角 + 粉色强调。
+     * 面颜色带透明度，壁纸从底层透出；文字对比度由全局暗化遮罩保证。
+     */
+    val Anime = SkinSpec(
+        id = "anime",
+        name = "二次元",
+        note = "半透明玻璃 · 大圆角 · 粉紫强调",
+        dialog = RoundedCornerShape(18.dp),
+        small = RoundedCornerShape(12.dp),
+        medium = RoundedCornerShape(18.dp),
+        large = RoundedCornerShape(26.dp),
+        sheet = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        tile = RoundedCornerShape(20.dp),
+        pill = RoundedCornerShape(50),
+        barHeight = 56.dp,
+        bottomHeight = 56.dp,
+        rowHeight = 54.dp,
+        rowIcon = 30.dp,
+        rowGutter = 14.dp,
+        title = 17.sp,
+        barMeta = 10.5.sp,
+        nameSize = 14.5.sp,
+        meta = 10.sp,
+        divider = DividerMode.NONE,
+        press = PressMode.TINT,
+        surface = SurfaceMode.CARD,
+        iconTint = IconTintMode.TYPE,
+        nameWeight = FontWeight.Medium,
+        letterGap = 0.15.sp,
+        metaMono = false,
+        selectionBar = false,
+        anime = true
+    )
 
     /**
      * 专业文件管理器观感：紧凑、直角、细线、克制。
@@ -220,8 +257,8 @@ object Skins {
         selectionBar = false
     )
 
-    val all: List<SkinSpec> = listOf(Classic, Slate, Paper, Soft)
+    val all: List<SkinSpec> = listOf(Anime, Classic, Slate, Paper, Soft)
 
     fun byId(id: String?): SkinSpec =
-        all.firstOrNull { it.id == id } ?: Classic
+        all.firstOrNull { it.id == id } ?: Anime
 }

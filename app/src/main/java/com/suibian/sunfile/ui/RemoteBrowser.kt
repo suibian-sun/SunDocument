@@ -72,6 +72,7 @@ import com.suibian.sunfile.data.remote.RemoteFs
 import com.suibian.sunfile.data.remote.RemoteFsFactory
 import com.suibian.sunfile.data.remote.parentOf
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 import kotlinx.coroutines.Dispatchers
@@ -259,7 +260,7 @@ fun RemoteBrowserPage(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .height(Mt.BarHeight)
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically

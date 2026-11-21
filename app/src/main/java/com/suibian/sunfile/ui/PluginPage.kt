@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suibian.sunfile.data.Plugins
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +101,7 @@ fun PluginPage(onBack: () -> Unit, onMtPlugins: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().background(SunColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().topBarBackground().statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {

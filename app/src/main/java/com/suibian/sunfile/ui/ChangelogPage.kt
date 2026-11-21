@@ -34,6 +34,7 @@ import com.suibian.sunfile.BuildConfig
 import com.suibian.sunfile.data.ChangeEntry
 import com.suibian.sunfile.data.Changelog
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 
 /** 设置 → 历史更新：每个版本一屏可读的改动清单 */
@@ -48,7 +49,7 @@ fun ChangelogPage(onBack: () -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .statusBarsPadding()
                 .height(Mt.BarHeight)
                 .padding(horizontal = 4.dp),

@@ -7,18 +7,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.suibian.sunfile.data.Mt2
 import com.suibian.sunfile.data.PrefsStore
+import com.suibian.sunfile.ui.AppBackdrop
 import com.suibian.sunfile.ui.MainScreen
 import com.suibian.sunfile.ui.theme.SunDocumentTheme
 import com.suibian.sunfile.util.Permissions
@@ -60,15 +64,26 @@ class MainActivity : ComponentActivity() {
             val prefs by prefsStore.prefs.collectAsStateWithLifecycle()
             val dark = prefs.themeMode.isDark(androidx.compose.foundation.isSystemInDarkTheme())
 
-            // 两种模式的顶栏都是深灰（#151515 / #303030），状态栏与导航栏图标固定用亮色
+            // 中性模板的顶栏恒为深灰，状态栏固定用亮色图标；
+            // 二次元模板的浅色顶栏是浅玻璃，必须切成深色图标，否则白字压在浅底上直接消失
+            val lightBars = prefs.skinId == "anime" && !dark
             SideEffect {
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-                    .isAppearanceLightStatusBars = false
+                    .isAppearanceLightStatusBars = lightBars
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView)
                     .isAppearanceLightNavigationBars = !dark
             }
 
             SunDocumentTheme(mode = prefs.themeMode, accent = prefs.accentColor, skinId = prefs.skinId) {
+                // 壁纸在页面之下，页面自身半透明，所以这层必须包住整个应用而不是某一页
+                Box(Modifier.fillMaxSize()) {
+                    AppBackdrop(
+                        // 中性模板的色板不透明，壁纸看不见；不加载也就不会白耗流量
+                        source = if (prefs.backdropEnabled && prefs.skinId == "anime") prefs.backdropSource else "",
+                        bust = prefs.backdropBust,
+                        blurDp = prefs.backdropBlur,
+                        dimPercent = prefs.backdropDim
+                    )
                 var hasAccess by remember { mutableStateOf(Permissions.hasAllFilesAccess(activity)) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
@@ -97,6 +112,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 )
+                }
             }
         }
     }

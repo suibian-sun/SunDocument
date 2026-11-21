@@ -119,6 +119,7 @@ import com.suibian.sunfile.data.Archives
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.ui.components.FileTypeBadge
 import com.suibian.sunfile.ui.theme.Motion
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.Mt
 import com.suibian.sunfile.ui.theme.NumberStyle
 import com.suibian.sunfile.ui.theme.SunColors
@@ -165,7 +166,7 @@ internal fun OverlayShell(
                 .navigationBarsPadding()
         ) {
             Row(
-                Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().topBarBackground().statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {

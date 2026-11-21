@@ -20,8 +20,8 @@ class SkinTest {
         assertEquals(ids.size, ids.toSet().size)
         assertEquals("classic", Skins.Classic.id)
         // 设置里存的是字符串，老版本升级后读不到时也必须能回退
-        assertEquals(Skins.Classic, Skins.byId(null))
-        assertEquals(Skins.Classic, Skins.byId("不存在的模板"))
+        assertEquals(Skins.Anime, Skins.byId(null))
+        assertEquals(Skins.Anime, Skins.byId("不存在的模板"))
     }
 
     @Test
@@ -34,6 +34,23 @@ class SkinTest {
             assertTrue("${s.id} 的边距不能为负", s.rowGutter.value >= 0)
             assertTrue("${s.id} 的底栏不能比顶栏高太多", s.bottomHeight.value <= s.barHeight.value + 12)
         }
+    }
+
+    @Test
+    fun animePaletteLetsTheWallpaperThrough() {
+        assertTrue("二次元模板要标记为半透明色板", Skins.Anime.anime)
+        assertTrue("深色底必须留出透明度", com.suibian.sunfile.ui.theme.AnimeDark.Bg.alpha < 1f)
+        assertTrue("浅色底必须留出透明度", com.suibian.sunfile.ui.theme.AnimeLight.Bg.alpha < 1f)
+        // 面板也不能完全不透明，否则壁纸只会在页面缝隙里露一条边
+        assertTrue(com.suibian.sunfile.ui.theme.AnimeDark.Surface1.alpha < 1f)
+        // 顶栏两端不同色，才会出现渐变
+        assertTrue(
+            com.suibian.sunfile.ui.theme.AnimeDark.TopBarGradientStart !=
+                com.suibian.sunfile.ui.theme.AnimeDark.TopBarGradientEnd
+        )
+        // 中性模板不能跟着变透明，否则老用户升级后会觉得「背景漏了」
+        assertTrue(!Skins.Classic.anime)
+        assertEquals(1f, com.suibian.sunfile.ui.theme.DarkPalette.Bg.alpha)
     }
 
     @Test

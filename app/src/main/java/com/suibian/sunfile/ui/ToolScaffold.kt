@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 
@@ -65,7 +66,7 @@ fun ToolScaffold(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .statusBarsPadding()
                 .height(Mt.BarHeight)
                 .padding(end = 8.dp),

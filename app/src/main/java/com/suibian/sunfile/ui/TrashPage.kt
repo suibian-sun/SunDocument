@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import com.suibian.sunfile.data.TrashItem
 import com.suibian.sunfile.ui.components.MaterialFileIcon
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.util.Fmt
 import java.text.SimpleDateFormat
@@ -75,7 +76,7 @@ fun TrashPage(
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().topBarBackground().statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(46.dp)) {

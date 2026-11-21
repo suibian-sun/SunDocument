@@ -60,6 +60,7 @@ import com.suibian.sunfile.data.DocWrite
 import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.SheetTable
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -153,7 +154,7 @@ fun DocEditPane(file: File, onClose: () -> Unit, onSaved: () -> Unit) {
             .navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().background(SunColors.TopBar).statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().topBarBackground().statusBarsPadding().height(Mt.BarHeight).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose, modifier = Modifier.size(46.dp)) {

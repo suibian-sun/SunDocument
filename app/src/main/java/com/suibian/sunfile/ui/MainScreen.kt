@@ -1958,7 +1958,12 @@ private fun TopBar(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(SunColors.TopBar)
+            // 中性模板两端同色，等价于纯色；二次元模板给出粉紫到深紫的竖直渐变
+            .background(
+                Brush.verticalGradient(
+                    listOf(SunColors.TopBarGradientStart, SunColors.TopBarGradientEnd)
+                )
+            )
             // 底色先铺满，再让状态栏高度算进栏内 —— 顶栏颜色一直延伸到屏幕最上沿
             .statusBarsPadding()
             .height(Mt.BarHeight)
@@ -2208,8 +2213,11 @@ private fun PaneView(
     // 没有分割线：聚焦的一栏抬到 Surface1，另一栏留在底色上或压到 Surface2，
     // 两栏之间靠明度差与边缘光分开，看起来像前后两个平面而不是一张纸上的两格。
     val dark = SunColors.dark
+    // 二次元模板下栏本身不再铺一层：底色已经半透明，再叠一次会把壁纸彻底盖死
+    val paneLetsWallpaperThrough = SunSkin.anime
     val bg by animateColorAsState(
         targetValue = when {
+            paneLetsWallpaperThrough -> Color.Transparent
             active -> SunColors.Surface1
             dark -> Color.Transparent
             else -> SunColors.Surface2

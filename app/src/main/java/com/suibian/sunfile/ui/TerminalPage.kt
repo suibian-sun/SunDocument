@@ -87,6 +87,7 @@ import com.suibian.sunfile.data.term.ATTR_UNDERLINE
 import com.suibian.sunfile.data.term.COLOR_DEFAULT
 import com.suibian.sunfile.data.term.TerminalSession
 import com.suibian.sunfile.ui.theme.Mt
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.ui.theme.SunShapes
 
@@ -226,7 +227,7 @@ fun TerminalPage(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(SunColors.TopBar)
+                .topBarBackground()
                 .statusBarsPadding()
                 .height(Mt.BarHeight)
                 .padding(horizontal = 4.dp),

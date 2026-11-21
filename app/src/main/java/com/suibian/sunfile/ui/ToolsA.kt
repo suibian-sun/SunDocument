@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.suibian.sunfile.data.RemoteServer
 import com.suibian.sunfile.ui.theme.NumberStyle
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.SunColors
 import com.suibian.sunfile.util.Fmt
 import kotlinx.coroutines.Dispatchers
@@ -586,7 +587,7 @@ fun MusicPage(onBack: () -> Unit) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(SunColors.TopBar)
+                    .topBarBackground()
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
                 Text(

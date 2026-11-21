@@ -8,7 +8,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
@@ -73,7 +76,10 @@ data class SunPalette(
     val OnTopBar: Color = TextPrimary,
     val OnTopBarMuted: Color = TextSecondary,
     /** 双栏之间的高对比分割线 */
-    val PaneDivider: Color = Hairline
+    val PaneDivider: Color = Hairline,
+    /** 顶栏渐变起点/终点：两者相同则画成纯色，避免无谓的分支 */
+    val TopBarGradientStart: Color = TopBar,
+    val TopBarGradientEnd: Color = TopBar
 )
 
 val DarkPalette = SunPalette(
@@ -147,6 +153,82 @@ val LightPalette = SunPalette(
     PaneDivider = Color(0xFF2B2B2B)
 )
 
+
+/**
+ * 二次元色板。
+ *
+ * 关键是「半透明」：所有面颜色留 15%–25% 的透明度，让壁纸从面板底下透出来，
+ * 形成玻璃卡片浮在插画上的层次。透明度压太狠会失去可读性，所以文字色
+ * 单独提到接近纯白/纯黑，并且默认叠一层暗化遮罩来兜底对比度。
+ */
+val AnimeDark = SunPalette(
+    dark = true,
+    Bg = Color(0x8C140F1F),
+    Surface1 = Color(0xA61C1629),
+    Surface2 = Color(0xB8231B33),
+    Surface3 = Color(0xCC2B2140),
+    Surface4 = Color(0xE633274D),
+    Hairline = Color(0x33FFD6E8),
+    TextPrimary = Color(0xFFFBF3FF),
+    TextSecondary = Color(0xFFCDBFE0),
+    TextTertiary = Color(0xFF9D8FB8),
+    Accent = Color(0xFFFF7EB6),
+    AccentSoft = Color(0x45FF7EB6),
+    AccentLine = Color(0x8CFF7EB6),
+    Folder = Color(0xFFFFC978),
+    File = Color(0xFFA294C0),
+    Danger = Color(0xFFFF6B8A),
+    Success = Color(0xFF6FE3B8),
+    Warning = Color(0xFFFFD36E),
+    Scrim = Color(0xB3000000),
+    CodeKeyword = Color(0xFFFF9ED2),
+    CodeString = Color(0xFF9EE6C8),
+    CodeComment = Color(0xFF8A7CA6),
+    CodeNumber = Color(0xFFFFC978),
+    CodeAnnotation = Color(0xFF9BD8FF),
+    CodeTag = Color(0xFFB9A6FF),
+    TopBar = Color(0x99100B18),
+    OnTopBar = Color(0xFFFDF6FF),
+    OnTopBarMuted = Color(0xFFC3B4D6),
+    PaneDivider = Color(0x40FF7EB6),
+    TopBarGradientStart = Color(0xCC2C1B44),
+    TopBarGradientEnd = Color(0xB3100B18)
+)
+
+val AnimeLight = SunPalette(
+    dark = false,
+    Bg = Color(0xB8FFF6FB),
+    Surface1 = Color(0xCCFFFFFF),
+    Surface2 = Color(0xD9FDF1F8),
+    Surface3 = Color(0xE6F7E6F2),
+    Surface4 = Color(0xFFFFFFFF),
+    Hairline = Color(0x269B6F92),
+    TextPrimary = Color(0xFF2A1F35),
+    TextSecondary = Color(0xFF5F4E70),
+    TextTertiary = Color(0xFF95859F),
+    Accent = Color(0xFFE2558F),
+    AccentSoft = Color(0x2EE2558F),
+    AccentLine = Color(0xFFF3B8D0),
+    Folder = Color(0xFFE89B3C),
+    File = Color(0xFF7C6B90),
+    Danger = Color(0xFFD63E5C),
+    Success = Color(0xFF1F9E76),
+    Warning = Color(0xFFB87B12),
+    Scrim = Color(0x66000000),
+    CodeKeyword = Color(0xFFC2185B),
+    CodeString = Color(0xFF2E7D5B),
+    CodeComment = Color(0xFF9C8CA8),
+    CodeNumber = Color(0xFFB26A00),
+    CodeAnnotation = Color(0xFF3B6FD4),
+    CodeTag = Color(0xFFD13B6B),
+    TopBar = Color(0xC7F7E9F3),
+    OnTopBar = Color(0xFF2A1F35),
+    OnTopBarMuted = Color(0xFF6B5878),
+    PaneDivider = Color(0x40E2558F),
+    TopBarGradientStart = Color(0xE6FFE3F3),
+    TopBarGradientEnd = Color(0xCCEFE3FF)
+)
+
 private val LocalSunPalette = staticCompositionLocalOf { DarkPalette }
 
 /** 全站取色入口：`SunColors.Accent` 在暗/亮主题下自动切换 */
@@ -201,11 +283,11 @@ object Motion {
  */
 private object SkinHolder {
     @Volatile
-    var spec: SkinSpec = Skins.Classic
+    var spec: SkinSpec = Skins.Anime
 }
 
 /** 当前模板（需要读更多字段时用这个） */
-val LocalSkin = staticCompositionLocalOf { Skins.Classic }
+val LocalSkin = staticCompositionLocalOf { Skins.Anime }
 
 /** 取当前模板，等价于 `LocalSkin.current` */
 val SunSkin: SkinSpec
@@ -292,7 +374,12 @@ fun SunDocumentTheme(
     val skin = remember(skinId) { Skins.byId(skinId) }
     // 先绑定模板，再渲染子树：任何一处读 SunShapes / Mt 都是新值
     SkinHolder.spec = skin
-    val base = if (dark) DarkPalette else LightPalette
+    // 二次元模板有自己的一套半透明色板，其余模板共用中性色板
+    val base = when {
+        skin.anime -> if (dark) AnimeDark else AnimeLight
+        dark -> DarkPalette
+        else -> LightPalette
+    }
     // 用户在设置里挑了主题色就替换强调色，其余语义色不动
     val palette = if (accent != 0L) {
         val c = Color(accent)
@@ -358,3 +445,20 @@ fun SunDocumentTheme(
         )
     }
 }
+
+
+/**
+ * 顶栏底色。
+ *
+ * 中性模板的两个渐变端同色，画出来就是原来的纯色；二次元模板给出粉紫渐变。
+ * 统一走这一个入口，避免十几个页面各自判断一次主题。
+ */
+@Composable
+fun Modifier.topBarBackground(): Modifier = this.background(
+    Brush.verticalGradient(
+        listOf(
+            LocalSunPalette.current.TopBarGradientStart,
+            LocalSunPalette.current.TopBarGradientEnd
+        )
+    )
+)

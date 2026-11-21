@@ -79,6 +79,7 @@ import com.suibian.sunfile.data.NetworkMount
 import com.suibian.sunfile.data.StorageInfo
 import com.suibian.sunfile.data.StorageStats
 import com.suibian.sunfile.ui.theme.SunColors
+import com.suibian.sunfile.ui.theme.topBarBackground
 import com.suibian.sunfile.ui.theme.ThemeMode
 import com.suibian.sunfile.util.Fmt
 import kotlinx.coroutines.Dispatchers
@@ -178,7 +179,7 @@ fun SidebarContent(
     Column(
         Modifier
             .fillMaxHeight()
-            .background(SunColors.TopBar)
+            .topBarBackground()
             .verticalScroll(rememberScrollState())
     ) {
         // ---------- 顶部固定区 ----------

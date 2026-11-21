@@ -35,8 +35,18 @@ data class AppPrefs(
     // ---------- 外观 ----------
     /** 主题色覆盖，0 表示跟随内置色板 */
     val accentColor: Long = 0L,
-    /** 界面模板：classic / slate / paper / soft，决定密度、圆角、分割线与字号 */
-    val skinId: String = "classic",
+    /** 界面模板：anime / classic / slate / paper / soft，决定密度、圆角、分割线与字号 */
+    val skinId: String = "anime",
+    /** 壁纸总开关 */
+    val backdropEnabled: Boolean = true,
+    /** 壁纸来源：本地 content:// 、图片直链、或图片 API 链接；空表示不使用 */
+    val backdropSource: String = "",
+    /** 壁纸高斯模糊半径（dp） */
+    val backdropBlur: Int = 18,
+    /** 壁纸遮罩强度（百分比）：深色压暗、浅色提亮 */
+    val backdropDim: Int = 45,
+    /** 换图计数：图片 API 靠它绕开缓存 */
+    val backdropBust: Long = 0L,
     /** -1 紧凑 / 0 标准 / 1 宽松 */
     val fileListSize: Int = 0,
     val fileNameMaxLines: Int = 1,
@@ -148,7 +158,12 @@ class PrefsStore private constructor(context: Context) {
         autoStartService = sp.getBoolean("auto_start_service", true),
 
         accentColor = sp.getLong("accent_color", 0L),
-        skinId = sp.getString("skin_id", "classic") ?: "classic",
+        skinId = sp.getString("skin_id", "anime") ?: "anime",
+        backdropEnabled = sp.getBoolean("backdrop_enabled", true),
+        backdropSource = sp.getString("backdrop_source", "") ?: "",
+        backdropBlur = sp.getInt("backdrop_blur", 18),
+        backdropDim = sp.getInt("backdrop_dim", 45),
+        backdropBust = sp.getLong("backdrop_bust", 0L),
         fileListSize = sp.getInt("file_list_size", 0),
         fileNameMaxLines = sp.getInt("file_name_lines", 1).coerceIn(1, 3),
         timeByCreated = sp.getBoolean("time_by_created", false),
@@ -381,6 +396,11 @@ class PrefsStore private constructor(context: Context) {
             .putBoolean("auto_start_service", p.autoStartService)
             .putLong("accent_color", p.accentColor)
             .putString("skin_id", p.skinId)
+            .putBoolean("backdrop_enabled", p.backdropEnabled)
+            .putString("backdrop_source", p.backdropSource)
+            .putInt("backdrop_blur", p.backdropBlur)
+            .putInt("backdrop_dim", p.backdropDim)
+            .putLong("backdrop_bust", p.backdropBust)
             .putInt("file_list_size", p.fileListSize)
             .putInt("file_name_lines", p.fileNameMaxLines)
             .putBoolean("time_by_created", p.timeByCreated)
