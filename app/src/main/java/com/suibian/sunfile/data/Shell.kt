@@ -3,93 +3,194 @@ package com.suibian.sunfile.data
 import android.os.Build
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 data class ShellResult(val out: String, val err: String, val code: Int) {
     val ok: Boolean get() = code == 0
 }
 
+/** 提权引擎：决定 shell 命令最终由谁执行 */
+enum class ShellEngine(val label: String, val detail: String) {
+    NONE("未授权", "只能读写普通应用可访问的目录"),
+    SHIZUKU("Shizuku", "代理给 shell 进程执行，可读根目录与系统分区"),
+    SU("Root", "以 uid 0 执行，可读包括 /data/data 在内的全部目录")
+}
+
 /**
- * Root 命令行后端。
+ * 提权命令行后端。
  *
  * 系统对 /data、/system、Android/data 等目录有 SELinux 与 scoped storage 限制，
- * 普通 API 无法枚举。这里通过 `su` 以 root 身份执行 ls/cat/cp，
- * 拿到的是真实文件系统数据，不做任何虚拟挂载或占位条目。
+ * 普通 API 无法枚举。这里把 ls / cat / cp 这类操作交给提权通道执行：
  *
- * 只有普通 File API 失败时才触发，避免正常浏览时弹授权框。
+ * - **Shizuku**：借 Shizuku 服务 fork 一个 shell 身份的进程（uid 2000），
+ *   系统看到的是 shell 在操作文件，SELinux 按 shell 域放行。这正是 MT 管理器的做法。
+ * - **Root**：直接 `su -c`，能力最强，能进 /data/data。
+ *
+ * 两条通道都只产出真实文件系统数据，绝不伪造挂载点或占位条目；
+ * 且只在普通 File API 失败时才触发，正常浏览不会反复弹授权。
  */
 object Shell {
 
     /**
-     * Root 会话状态。默认关闭：不在浏览时自动执行 su，
-     * 否则未 root 的机器每次进受限目录都会弹授权框并阻塞数秒。
-     * 由用户在设置里主动开启。
+     * 当前引擎。默认 NONE：不在浏览时自动提权，否则每次进受限目录都会卡住等授权。
+     * 用 StateFlow 承载，界面可以跟着授权结果实时刷新。
      */
-    @Volatile
-    var enabled: Boolean = false
-        private set
+    private val _engine = MutableStateFlow(ShellEngine.NONE)
+    val engineState: StateFlow<ShellEngine> = _engine
 
-    val rootAvailable: Boolean get() = enabled
+    var engine: ShellEngine
+        get() = _engine.value
+        private set(value) { _engine.value = value }
 
-    /** 主动申请 root：执行一次 su 探测，成功则后续所有受限操作走 shell */
-    fun requestRoot(): Boolean {
-        val ok = runCatching {
-            val r = exec(listOf("su", "-c", "id"), 8_000)
-            r.ok && r.out.contains("uid=0")
-        }.getOrDefault(false)
-        enabled = ok
+    val rootAvailable: Boolean get() = engine != ShellEngine.NONE
+
+    val engineLabel: String get() = engine.label
+
+    /** 状态一句话，给设置页和错误提示用 */
+    val statusText: String get() = when (engine) {
+        ShellEngine.NONE -> "未授权 · 受限目录无法读取"
+        ShellEngine.SHIZUKU -> "Shizuku · 可读根目录与系统分区"
+        ShellEngine.SU -> "Root · 可读全部目录"
+    }
+
+    // ---------------- 授权 ----------------
+
+    /**
+     * 申请提权，自动选路：已授过权的先用，其次 Shizuku（无弹框、无需 root），
+     * 最后才尝试 su。返回最终生效的引擎。
+     */
+    fun requestAuto(): ShellEngine {
+        if (engine != ShellEngine.NONE && verify(engine)) return engine
+        if (ShizukuBridge.usable() && activate(ShellEngine.SHIZUKU)) return engine
+        if (activate(ShellEngine.SU)) return engine
+        return ShellEngine.NONE
+    }
+
+    /** 兼容旧调用点：等价于 [requestAuto] */
+    fun requestRoot(): Boolean = requestAuto() != ShellEngine.NONE
+
+    /** 只申请 Shizuku（不碰 su，不会弹 root 授权框） */
+    fun requestShizuku(): Boolean = activate(ShellEngine.SHIZUKU)
+
+    /** 只申请 Root */
+    fun requestSu(): Boolean = activate(ShellEngine.SU)
+
+    /**
+     * 切到指定引擎并实际验证一次：能让 `id` 跑通才算成功。
+     * 验证失败会退回原来的引擎，避免留下「看起来可用但其实跑不动」的状态。
+     */
+    fun activate(target: ShellEngine): Boolean {
+        if (target == ShellEngine.NONE) {
+            engine = ShellEngine.NONE
+            return false
+        }
+        if (target == ShellEngine.SHIZUKU && !ShizukuBridge.usable()) return false
+        val prev = engine
+        engine = target
+        val ok = verify(target)
+        engine = if (ok) target else prev
         return ok
     }
 
-    fun reset() {
-        enabled = false
+    private fun verify(target: ShellEngine): Boolean {
+        val prev = engine
+        engine = target
+        return try {
+            val r = execScript("id", 8_000)
+            val out = r.out
+            when (target) {
+                ShellEngine.SU -> r.ok && out.contains("uid=0")
+                // shell 身份是 uid 2000；用 root 启动的 Shizuku 也可能是 0
+                ShellEngine.SHIZUKU -> r.ok && (out.contains("uid=2000") || out.contains("uid=0"))
+                ShellEngine.NONE -> false
+            }
+        } catch (e: Exception) {
+            false
+        } finally {
+            engine = prev
+        }
     }
 
+    /** 忘记已获得的权限（用户主动断开时调用） */
+    fun reset() {
+        engine = ShellEngine.NONE
+    }
+
+    // ---------------- 进程 ----------------
+
+    /** 按指定引擎起一个进程执行整段脚本 */
+    private fun startProcess(e: ShellEngine, script: String): Process = when (e) {
+        ShellEngine.SU -> ProcessBuilder("su", "-c", script).start()
+        ShellEngine.SHIZUKU -> ShizukuBridge.newProcess(arrayOf("/system/bin/sh", "-c", script))
+            ?: throw IOException("Shizuku 未能创建进程")
+        ShellEngine.NONE -> ProcessBuilder("/system/bin/sh", "-c", script).start()
+    }
+
+    /** 直接跑一个命令行（用于 su 探测，不经过引擎分派） */
     fun exec(cmd: List<String>, timeoutMs: Long = 15_000): ShellResult {
         var process: Process? = null
         return try {
-            val pb = ProcessBuilder(cmd).redirectErrorStream(false)
-            process = pb.start()
-            val out = ByteArrayOutputStream()
-            val err = ByteArrayOutputStream()
-            val t = Thread {
-                runCatching {
-                    process.inputStream.use { it.copyTo(out, 64 * 1024) }
-                }
-            }
-            val te = Thread {
-                runCatching {
-                    process.errorStream.use { it.copyTo(err, 8 * 1024) }
-                }
-            }
-            t.start(); te.start()
-            val finished = waitForCompat(process, timeoutMs)
-            if (!finished) {
-                runCatching { killCompat(process) }
-                return ShellResult("", "timeout", -1)
-            }
-            t.join(1500); te.join(800)
-            ShellResult(
-                String(out.toByteArray(), Charsets.UTF_8),
-                String(err.toByteArray(), Charsets.UTF_8),
-                process.exitValue()
-            )
+            process = ProcessBuilder(cmd).redirectErrorStream(false).start()
+            pump(process, timeoutMs)
         } catch (e: Exception) {
             runCatching { process?.destroy() }
             ShellResult("", e.message ?: "shell error", -1)
         }
     }
 
-    /** 通用执行：asRoot 且已授权时走 su，否则走普通 sh */
+    /** 按当前引擎执行脚本 */
+    private fun execScript(script: String, timeoutMs: Long = 20_000): ShellResult {
+        var process: Process? = null
+        return try {
+            process = startProcess(engine, script)
+            pump(process, timeoutMs)
+        } catch (e: Exception) {
+            runCatching { process?.destroy() }
+            degradeIfBroken()
+            ShellResult("", e.message ?: "shell error", -1)
+        }
+    }
+
+    /**
+     * Shizuku 服务被系统回收后 binder 会失效，此时再留着「已授权」只会让每条命令都白跑一次。
+     * 检测到链路断了就退回未授权，界面会重新出现授权引导。
+     */
+    private fun degradeIfBroken() {
+        if (engine == ShellEngine.SHIZUKU && !ShizukuBridge.usable()) {
+            engine = ShellEngine.NONE
+        }
+    }
+
+    /** 并发抽干 stdout / stderr 并等待退出；缓冲满了进程会阻塞，必须同时读 */
+    private fun pump(process: Process, timeoutMs: Long): ShellResult {
+        val out = ByteArrayOutputStream()
+        val err = ByteArrayOutputStream()
+        val t = Thread { runCatching { process.inputStream.use { it.copyTo(out, 64 * 1024) } } }
+        val te = Thread { runCatching { process.errorStream.use { it.copyTo(err, 8 * 1024) } } }
+        t.start(); te.start()
+        val finished = waitForCompat(process, timeoutMs)
+        if (!finished) {
+            runCatching { killCompat(process) }
+            return ShellResult("", "timeout", -1)
+        }
+        t.join(1500); te.join(800)
+        val code = runCatching { process.exitValue() }.getOrDefault(-1)
+        return ShellResult(String(out.toByteArray(), Charsets.UTF_8), String(err.toByteArray(), Charsets.UTF_8), code)
+    }
+
+    /** 通用执行：asRoot 且已授权时走提权引擎，否则走普通 sh */
     fun runScript(script: String, asRoot: Boolean = false, timeoutMs: Long = 25_000): ShellResult =
-        if (asRoot && enabled) exec(listOf("su", "-c", script), timeoutMs)
+        if (asRoot && engine != ShellEngine.NONE) execScript(script, timeoutMs)
         else exec(listOf("/system/bin/sh", "-c", script), timeoutMs)
 
-    /** 判断目录是否存在并返回真实路径；root 模式下可以解析受限目录 */
+    /** 判断目录是否存在并返回真实路径；提权模式下可以解析受限目录 */
     fun resolveDir(path: String): String? {
-        if (!enabled) {
+        if (engine == ShellEngine.NONE) {
             val f = File(path)
             return if (f.isDirectory) runCatching { f.canonicalPath }.getOrDefault(f.absolutePath) else null
         }
@@ -97,31 +198,37 @@ object Shell {
         return r.out.trim().takeIf { it.isNotEmpty() }
     }
 
-    /** 以 root 执行一段 shell 脚本 */
+    /** 以当前引擎执行一段 shell 脚本 */
     fun sh(script: String, timeoutMs: Long = 20_000): ShellResult =
-        if (!enabled) ShellResult("", "root disabled", -1)
-        else exec(listOf("su", "-c", script), timeoutMs)
+        if (engine == ShellEngine.NONE) ShellResult("", "shell engine disabled", -1)
+        else execScript(script, timeoutMs)
 
-    /** 执行二进制安全的读取（不经 UTF-8 转换） */
-    fun execBytes(cmd: List<String>, timeoutMs: Long = 20_000): ByteArray {
-        if (!enabled) return ByteArray(0)
+    /** 二进制安全的读取：脚本 stdout 原样取回，不做任何编码转换 */
+    fun execScriptBytes(script: String, timeoutMs: Long = 20_000): ByteArray {
+        if (engine == ShellEngine.NONE) return ByteArray(0)
         var process: Process? = null
         return try {
-            process = ProcessBuilder(cmd).start()
+            process = startProcess(engine, script)
             val out = ByteArrayOutputStream()
             val drain = Thread {
                 runCatching { process.errorStream.use { it.copyTo(ByteArrayOutputStream(), 4 * 1024) } }
             }
             drain.start()
             process.inputStream.use { it.copyTo(out, 128 * 1024) }
-            val finished = waitForCompat(process, timeoutMs)
-            if (!finished) runCatching { killCompat(process) }
+            if (!waitForCompat(process, timeoutMs)) runCatching { killCompat(process) }
             drain.join(500)
             out.toByteArray()
         } catch (e: Exception) {
             runCatching { process?.destroy() }
+            degradeIfBroken()
             ByteArray(0)
         }
+    }
+
+    /** 兼容旧签名：把一个命令列表拼成脚本执行 */
+    fun execBytes(cmd: List<String>, timeoutMs: Long = 20_000): ByteArray {
+        if (engine == ShellEngine.NONE) return ByteArray(0)
+        return execScriptBytes(cmd.joinToString(" "), timeoutMs)
     }
 
     /** API 24/25 没有带超时的 waitFor，用轮询退避模拟 */
@@ -154,7 +261,7 @@ object Shell {
     private val DATE_FMT_SEC = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
 
     /**
-     * 用 `ls -la` 列出真实目录内容。返回 null 表示连 root 都读不到。
+     * 用 `ls -la` 列出真实目录内容。返回 null 表示连提权通道都读不到。
      */
     fun list(dir: String, showHidden: Boolean): List<FileEntry>? {
         val r = sh("ls -la --color=never ${q(dir)} 2>/dev/null || ls -la ${q(dir)}")
@@ -214,22 +321,31 @@ object Shell {
     /** 读取任意偏移的字节（1-based tail，二进制安全） */
     fun readRange(path: String, offset: Long, length: Int): ByteArray {
         val start = offset + 1
-        return execBytes(listOf("su", "-c", "tail -c +$start -- ${q(path)} | head -c $length"))
+        return execScriptBytes("tail -c +$start -- ${q(path)} | head -c $length")
     }
 
     /** 读取整个文件（超长会截断到 [max]） */
     fun readAll(path: String, max: Long): ByteArray =
-        execBytes(listOf("su", "-c", "head -c $max -- ${q(path)}"))
+        execScriptBytes("head -c $max -- ${q(path)}")
 
     // ---------------- 写 ----------------
 
-    /** 覆盖写入：通过 stdin 送入 cat，避免临时文件与参数长度限制 */
+    /** 覆盖写入：内容从 stdin 送进 cat，避免临时文件与参数长度限制 */
     fun writeAll(path: String, bytes: ByteArray): Boolean = runCatching {
-        val process = ProcessBuilder("su", "-c", "cat > ${q(path)}").start()
-        process.outputStream.use { it.write(bytes) }
+        if (engine == ShellEngine.NONE) return false
+        val process = startProcess(engine, "cat > ${q(path)}")
+        // stdout 必须同时抽干，否则大文件写到一半会把管道堵死
+        val drain = Thread { runCatching { process.inputStream.use { it.copyTo(ByteArrayOutputStream(), 8 * 1024) } } }
+        val drainErr = Thread { runCatching { process.errorStream.use { it.copyTo(ByteArrayOutputStream(), 4 * 1024) } } }
+        drain.start(); drainErr.start()
+        val okWrite = runCatching {
+            process.outputStream.use { it.write(bytes) }
+            true
+        }.getOrDefault(false)
         val ok = waitForCompat(process, 30_000)
         if (!ok) runCatching { killCompat(process) }
-        ok && process.exitValue() == 0
+        drain.join(600); drainErr.join(400)
+        okWrite && ok && runCatching { process.exitValue() }.getOrDefault(-1) == 0
     }.getOrDefault(false)
 
     /** 修改权限位，如 "644" */
@@ -244,7 +360,6 @@ object Shell {
         return r.out.trim().takeIf { r.ok && it.length >= 10 }
     }
 
-    /** root 下删除（root 可删系统目录内容） */
     fun delete(path: String): Boolean = sh("rm -rf ${q(path)}").ok
 
     fun mkdir(path: String): Boolean = sh("mkdir -p ${q(path)}").ok

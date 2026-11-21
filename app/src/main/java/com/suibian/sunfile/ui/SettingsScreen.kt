@@ -1,5 +1,7 @@
 package com.suibian.sunfile.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,13 +42,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import com.suibian.sunfile.BuildConfig
 import com.suibian.sunfile.data.AppPrefs
+import com.suibian.sunfile.data.Shell
+import com.suibian.sunfile.data.ShellEngine
+import com.suibian.sunfile.data.ShizukuBridge
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.suibian.sunfile.update.ReleaseInfo
 import com.suibian.sunfile.update.UpdateState
 import com.suibian.sunfile.ui.theme.NumberStyle
@@ -167,12 +183,8 @@ fun SettingsPage(
             }
             InfoRow("修改历史", "保存前自动留档，单个文件保留最近 30 个版本")
 
-            SectionTitle("系统访问")
-            ValueRow(
-                "Root 权限",
-                if (com.suibian.sunfile.data.Shell.rootAvailable) "已获取 · 可读取全部目录" else "未获取 · 点击申请",
-                onRequestRoot
-            )
+            SectionTitle("存储访问")
+            StorageAccessRows(onGranted = onRequestRoot)
 
             SectionTitle("打开方式")
             ValueRow("默认打开方式", "${prefs.openWith.size} 个", onOpenWithManager)
@@ -195,6 +207,81 @@ fun SettingsPage(
             )
             Spacer(Modifier.height(20.dp))
         }
+    }
+}
+
+/**
+ * 存储访问：把「怎么读受限目录」讲清楚，并给出两条通道。
+ *
+ * Shizuku 是主角——它不需要设备 root，只要装一个用 adb 启动过的 Shizuku 服务，
+ * 我们的文件操作就会被代理到 shell 进程执行。普通应用读不到 / 和 /system，
+ * 而 shell 身份可以。
+ */
+@Composable
+private fun StorageAccessRows(onGranted: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val engine by Shell.engineState.collectAsState()
+    var shizukuText by remember { mutableStateOf(ShizukuBridge.statusText(context)) }
+
+    // 授权框是 Shizuku 自己弹的，结果只能从它的回调里拿。
+    // 真正的接管与刷新由主界面统一处理，这里只负责把文案改过来。
+    DisposableEffect(Unit) {
+        val listener: (Boolean) -> Unit = {
+            shizukuText = ShizukuBridge.statusText(context)
+        }
+        ShizukuBridge.addResultListener(listener)
+        onDispose { ShizukuBridge.removeResultListener(listener) }
+    }
+
+    ValueRow("Shizuku 通道", shizukuText) {
+        when {
+            // 没装：直接送到官方发布页，避免用户下到仿冒包
+            !ShizukuBridge.installed(context) -> {
+                val ok = runCatching {
+                    context.startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }.isSuccess
+                toast(context, if (ok) "请先安装 Shizuku 并启动服务" else "未安装 Shizuku")
+            }
+            // 装了但服务没起：唤起 Shizuku 让它自己提示启动方式
+            !ShizukuBridge.running() -> {
+                val ok = runCatching {
+                    val i = context.packageManager.getLaunchIntentForPackage(ShizukuBridge.PACKAGE)
+                        ?: error("no launcher")
+                    context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.isSuccess
+                toast(context, if (ok) "在 Shizuku 里点「启动」后再回来" else "Shizuku 服务未运行")
+            }
+            !ShizukuBridge.permitted() -> {
+                if (!ShizukuBridge.requestPermission()) toast(context, "无法请求授权")
+            }
+            else -> scope.launch {
+                val ok = withContext(Dispatchers.IO) { Shell.requestShizuku() }
+                shizukuText = ShizukuBridge.statusText(context)
+                onGranted()
+                toast(context, if (ok) "Shizuku 已接管文件操作" else "Shizuku 通道不可用")
+            }
+        }
+    }
+
+    ValueRow(
+        "Root 通道",
+        if (engine == ShellEngine.SU) "已授权 · 可读全部目录" else "未授权 · 点击申请",
+        onGranted
+    )
+
+    if (engine != ShellEngine.NONE) {
+        InfoRow("当前引擎", Shell.statusText)
+    } else {
+        InfoRow(
+            "说明",
+            "Shizuku 以 shell 身份运行，能读根目录与系统分区；/data/data 下的应用私有目录仍需 Root。"
+        )
     }
 }
 

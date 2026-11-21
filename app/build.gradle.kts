@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.7.0"
-val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 24
+val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.7.1"
+val appVersionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 25
 
 android {
     namespace = "com.suibian.sunfile"
@@ -105,6 +105,9 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // 免 Root 访问 Android/data：SAF 目录
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Shizuku：把文件操作代理给 shell 进程执行，绕过普通 App 的 SELinux / scoped storage 限制
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     // 给改过的 APK 重签名（v1 + v2 + v3）
     implementation("com.android.tools.build:apksig:8.5.2")
     // Smali 反汇编 / 汇编：dexlib2 + baksmali + smali（纯 Java，运行期只用 antlr runtime）

@@ -95,6 +95,13 @@ object FileRepo {
         }
         if (dir.exists() && !dir.isDirectory) return DirListing(emptyList(), true, "不是目录")
 
+        // 根目录与系统分区：普通 API 要么直接失败，要么只吐出零星几条（隐藏了大部分）。
+        // 既然已经拿到了提权通道，就直接用它读，避免出现「看着有内容其实不全」的假目录。
+        if (Shell.rootAvailable && (dir.absolutePath == "/" || isSystemRestricted(dir))) {
+            val viaShell = Shell.list(dir.absolutePath, showHidden)
+            if (viaShell != null) return DirListing(sort(viaShell, sort), false, null)
+        }
+
         val names: Array<String>? = try {
             dir.list()
         } catch (e: SecurityException) {
@@ -171,13 +178,19 @@ object FileRepo {
 
     fun restrictedMessage(dir: File): String {
         val p = dir.absolutePath
-        return when {
+        val base = when {
             p.contains("/Android/data") || p.contains("/Android/obb") -> "需要 Root 才能读取应用数据目录"
             p == "/data" || p.startsWith("/data/") -> "需要 Root 才能读取系统数据分区"
             p.startsWith("/system") || p.startsWith("/vendor") -> "需要 Root 才能读取系统分区"
             p.startsWith("/proc") || p.startsWith("/sys") -> "需要 Root 才能读取内核文件系统"
             p == "/storage/emulated/0" || p.startsWith("/storage/emulated/0/") -> "缺少存储访问权限"
             else -> "没有读取权限"
+        }
+        // 还没开任何通道时，明确告诉用户去哪儿开；开了 Shizuku 仍读不到，说明确实要 Root
+        return when (Shell.engine) {
+            ShellEngine.NONE -> "$base · 可在侧边栏「工具 → 更多工具」或设置里启用 Shizuku"
+            ShellEngine.SHIZUKU -> "$base（Shizuku 是 shell 身份，此目录需要真正的 Root）"
+            ShellEngine.SU -> base
         }
     }
 

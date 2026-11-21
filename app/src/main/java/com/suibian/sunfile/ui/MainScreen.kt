@@ -112,6 +112,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -275,6 +276,34 @@ fun MainScreen(
     LaunchedEffect(Unit) {
         StorageBook.ensure(context)
         vm.init()
+        // 上次已经授过 Shizuku 的话，这里静默恢复，不必让用户再点一次
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (com.suibian.sunfile.data.ShizukuBridge.usable()) {
+                com.suibian.sunfile.data.Shell.requestShizuku()
+            }
+        }
+    }
+
+    // Shizuku 的授权框由它自己弹，结果在这里统一收口：
+    // 授权成功后立刻把文件操作切到 Shizuku 引擎，并重读当前目录。
+    DisposableEffect(Unit) {
+        val listener: (Boolean) -> Unit = { granted ->
+            if (granted) {
+                scope.launch {
+                    val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.suibian.sunfile.data.Shell.requestShizuku()
+                    }
+                    Toast.makeText(
+                        context,
+                        if (ok) "Shizuku 已接管，可读取根目录" else "Shizuku 通道不可用",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    if (ok) vm.refreshAll()
+                }
+            }
+        }
+        com.suibian.sunfile.data.ShizukuBridge.addResultListener(listener)
+        onDispose { com.suibian.sunfile.data.ShizukuBridge.removeResultListener(listener) }
     }
 
     LaunchedEffect(updateTick) {
@@ -692,7 +721,7 @@ fun MainScreen(
                         onRequestRoot = {
                             scope.launch {
                                 val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    com.suibian.sunfile.data.Shell.requestRoot()
+                                    com.suibian.sunfile.data.Shell.requestSu()
                                 }
                                 Toast.makeText(
                                     context,
@@ -2110,24 +2139,37 @@ private fun PaneList(
                     )
                     if (!com.suibian.sunfile.data.Shell.rootAvailable) {
                         Spacer(Modifier.width(4.dp))
+                        // 首选 Shizuku：不用 root，授权一次就能读根目录
+                        val shizukuReady = com.suibian.sunfile.data.ShizukuBridge.usable()
                         Text(
-                            "获取 Root",
+                            if (shizukuReady) "用 Shizuku 读取" else "获取权限",
                             color = SunColors.TextPrimary,
                             fontSize = 10.5.sp,
                             modifier = Modifier
                                 .clip(SunShapes.Small)
                                 .background(SunColors.AccentSoft)
                                 .clickable {
-                                    scope.launch {
-                                        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            com.suibian.sunfile.data.Shell.requestRoot()
+                                    when {
+                                        shizukuReady -> scope.launch {
+                                            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                com.suibian.sunfile.data.Shell.requestShizuku()
+                                            }
+                                            if (ok) onRetry()
                                         }
-                                        Toast.makeText(
-                                            context,
-                                            if (ok) "已获得 Root" else "未获得 Root",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        if (ok) onRetry()
+                                        // 装了但没授权：弹 Shizuku 的授权框，结果由上方统一回调接管
+                                        com.suibian.sunfile.data.ShizukuBridge.running() ->
+                                            com.suibian.sunfile.data.ShizukuBridge.requestPermission()
+                                        else -> scope.launch {
+                                            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                com.suibian.sunfile.data.Shell.requestSu()
+                                            }
+                                            Toast.makeText(
+                                                context,
+                                                if (ok) "已获得 Root" else "未获得 Root",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            if (ok) onRetry()
+                                        }
                                     }
                                 }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)

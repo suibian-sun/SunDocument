@@ -17,6 +17,19 @@ object Changelog {
 
     val entries: List<ChangeEntry> = listOf(
         ChangeEntry(
+            version = "1.7.1",
+            date = "2026-11-21",
+            title = "Shizuku 接管：读得进根目录",
+            items = listOf(
+                "接入 Shizuku 引擎：文件操作不再由本应用发起，而是代理给 Shizuku 的 shell 进程执行",
+                "系统看到的是 shell 在操作文件，SELinux 按 shell 域放行 —— 根目录、/system、/vendor、/data/local/tmp 都能正常列出",
+                "三条通道自动选路：Shizuku 优先，其次 Root，都没有时退回普通 API；授权一次后启动自动恢复",
+                "根目录与系统分区不再依赖 File API 的残缺结果，直接用 ls -la 拿完整列表与权限位",
+                "设置页「存储访问」可分别查看与申请 Shizuku / Root，未安装或服务未运行会给出对应引导",
+                "受限目录的提示会区分「还没开通道」与「Shizuku 是 shell 身份、此处确实需要 Root」，不再一句笼统的没有权限"
+            )
+        ),
+        ChangeEntry(
             version = "1.7.0",
             date = "2026-11-21",
             title = "侧边栏重做与九件工具",

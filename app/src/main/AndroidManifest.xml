@@ -61,6 +61,16 @@
                 android:resource="@xml/inspect_service" />
         </service>
 
+        <!-- Shizuku 客户端：通过这个 ContentProvider 拿到服务 binder，
+             之后文件操作才能代理给 shell 进程执行 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <service
             android:name=".service.ProjectionService"
             android:exported="false"
