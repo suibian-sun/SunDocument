@@ -28,6 +28,10 @@ object Thumbs {
 
     private const val TARGET = 160
 
+    /** 设置里的「加载缩略图」：关掉后连缓存都不查，直接走格式图标 */
+    @Volatile
+    var enabled: Boolean = true
+
     private fun key(file: File): String =
         "${file.absolutePath}|${file.lastModified()}|${file.length()}"
 
@@ -35,6 +39,7 @@ object Thumbs {
 
     /** 同步取（会在调用线程解码，仅用于已经在后台的场景） */
     fun load(file: File, kind: ThumbKind): Bitmap? {
+        if (!enabled) return null
         val k = key(file)
         cache.get(k)?.let { return it }
         val bmp = runCatching {

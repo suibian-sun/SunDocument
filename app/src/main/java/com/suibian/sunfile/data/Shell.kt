@@ -47,6 +47,10 @@ object Shell {
         get() = _engine.value
         private set(value) { _engine.value = value }
 
+    /** 自定义 su 命令（多用户 / 非标准路径的 su），由设置同步进来 */
+    @Volatile
+    var suCommand: String = "su"
+
     val rootAvailable: Boolean get() = engine != ShellEngine.NONE
 
     val engineLabel: String get() = engine.label
@@ -125,7 +129,7 @@ object Shell {
 
     /** 按指定引擎起一个进程执行整段脚本 */
     private fun startProcess(e: ShellEngine, script: String): Process = when (e) {
-        ShellEngine.SU -> ProcessBuilder("su", "-c", script).start()
+        ShellEngine.SU -> ProcessBuilder(suCommand, "-c", script).start()
         ShellEngine.SHIZUKU -> ShizukuBridge.newProcess(arrayOf("/system/bin/sh", "-c", script))
             ?: throw IOException("Shizuku 未能创建进程")
         ShellEngine.NONE -> ProcessBuilder("/system/bin/sh", "-c", script).start()

@@ -255,6 +255,8 @@ fun MainScreen(
     // 列表密度与时间格式：设置一改这里立刻反映到每一行
     SideEffect {
         BottomBarStyle.extra = if (prefs.bottomBarExtra) prefs.bottomBarPadding.dp else 0.dp
+        com.suibian.sunfile.data.Shell.suCommand = prefs.customSuCommand.ifBlank { "su" }
+        com.suibian.sunfile.ui.components.Thumbs.enabled = prefs.externalThumbs
         ListStyleHolder.style = ListStyle(
             rowHeight = when (prefs.fileListSize) {
                 -1 -> Mt.RowHeight - 8.dp
