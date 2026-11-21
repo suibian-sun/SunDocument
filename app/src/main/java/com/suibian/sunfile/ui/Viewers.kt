@@ -361,7 +361,8 @@ fun ImageViewerOverlay(file: File, playlist: List<File>, onClose: () -> Unit) {
         title = current.name,
         subtitle = "${index + 1} / ${list.size} · ${Fmt.size(current.length())}",
         onClose = onClose,
-        background = Color(0xFF121316),
+        // 与页面底色一致（暗 #303030 / 亮 #FAFAFA），不另开一套深色
+        background = SunColors.Bg,
         actions = {
             IconButton(onClick = { exifFor = current }, modifier = Modifier.size(42.dp)) {
                 Icon(

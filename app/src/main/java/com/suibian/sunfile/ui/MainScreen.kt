@@ -77,6 +77,8 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Unarchive
@@ -149,6 +151,10 @@ import com.suibian.sunfile.data.FileKinds
 import com.suibian.sunfile.data.FileRepo
 import com.suibian.sunfile.data.OpenMode
 import com.suibian.sunfile.data.SortMode
+import com.suibian.sunfile.data.StorageBook
+import com.suibian.sunfile.data.NetworkMount
+import com.suibian.sunfile.data.LocalMount
+import com.suibian.sunfile.data.DEFAULT_GROUP
 import com.suibian.sunfile.ui.components.DrawCheck
 import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
@@ -187,6 +193,15 @@ sealed interface Page {
     data object Mcp : Page
     data object Inspect : Page
     data object MtPlugins : Page
+    data object Apps : Page
+    data object Remote : Page
+    data object Signing : Page
+    data object SmaliRef : Page
+    data object Passwords : Page
+    data object Stream : Page
+    data object Payload : Page
+    data object ColorPick : Page
+    data object Music : Page
 }
 
 /** 内置全屏查看器 */
@@ -231,6 +246,8 @@ fun MainScreen(
 
     val pane = panes[active]
     val snackbarHost = remember { SnackbarHostState() }
+    // 在组合上下文中读一次，供下方非 @Composable 的点击回调使用
+    val darkNow = SunColors.dark
 
     var page by remember { mutableStateOf<Page>(Page.Files) }
     var overflowOpen by remember { mutableStateOf(false) }
@@ -249,11 +266,16 @@ fun MainScreen(
     var pluginOutput by remember { mutableStateOf<String?>(null) }
     var zipEdit by remember { mutableStateOf<ZipEdit?>(null) }
     var searchOpen by remember { mutableStateOf(false) }
+    var storeDialog by remember { mutableStateOf<StorageDialog?>(null) }
+    var networkTarget by remember { mutableStateOf<NetworkMount?>(null) }
     // 从压缩包内打开文件时记住来源，关掉查看器/编辑器后回到原来的压缩包位置
     var archiveReturn by remember { mutableStateOf<ArchiveReturn?>(null) }
     var archivePrefix by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { vm.init() }
+    LaunchedEffect(Unit) {
+        StorageBook.ensure(context)
+        vm.init()
+    }
 
     LaunchedEffect(updateTick) {
         if (updateTick > 0) updateVm.check(silent = false, useAccelerator = prefs.useAccelerator)
@@ -398,45 +420,77 @@ fun MainScreen(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
         drawerContent = {
-            DrawerContent(
-                currentPath = pane.path,
-                version = BuildConfig.VERSION_NAME,
-                recent = prefs.recent,
-                storageUsed = storage?.used ?: 0L,
-                storageTotal = storage?.total ?: 0L,
-                bookmarks = prefs.bookmarks,
-                onNavigate = { path ->
-                    vm.navigate(path)
-                    page = Page.Files
-                    scope.launch { drawerState.close() }
-                },
-                onBookmarks = {
-                    sheet = SheetKind.Bookmarks
-                    scope.launch { drawerState.close() }
-                },
-                onSettings = { page = Page.Settings; scope.launch { drawerState.close() } },
-                onCheckUpdate = {
-                    updateVm.check(silent = false, useAccelerator = prefs.useAccelerator)
-                    scope.launch { drawerState.close() }
-                },
-                onAbout = {
-                    dialog = DialogKind.About
-                    scope.launch { drawerState.close() }
-                },
-                onTerminal = {
-                    page = Page.Terminal
-                    scope.launch { drawerState.close() }
-                },
-                onSaf = { path ->
-                    safPath = path
-                    page = Page.Saf
-                    scope.launch { drawerState.close() }
-                },
-                onSysInfo = {
-                    page = Page.SysInfo
-                    scope.launch { drawerState.close() }
-                }
-            )
+            val store by StorageBook.config.collectAsStateWithLifecycle()
+            ModalDrawerSheet(
+                drawerContainerColor = SunColors.Bg,
+                drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
+                modifier = Modifier.width(318.dp)
+            ) {
+                SidebarContent(
+                    currentPath = pane.path,
+                    version = BuildConfig.VERSION_NAME,
+                    dark = darkNow,
+                    themeMode = prefs.themeMode,
+                    locals = store.locals,
+                    networks = store.networks,
+                    groups = store.groups,
+                    onNavigate = { path ->
+                        vm.navigate(path)
+                        page = Page.Files
+                        scope.launch { drawerState.close() }
+                    },
+                    onToggleTheme = {
+                        vm.prefsStore.setThemeMode(
+                            if (darkNow) com.suibian.sunfile.ui.theme.ThemeMode.LIGHT
+                            else com.suibian.sunfile.ui.theme.ThemeMode.DARK
+                        )
+                    },
+                    onFollowSystem = {
+                        vm.prefsStore.setThemeMode(com.suibian.sunfile.ui.theme.ThemeMode.SYSTEM)
+                    },
+                    onAddLocal = { storeDialog = StorageDialog.AddLocal },
+                    onAddNetwork = { storeDialog = StorageDialog.AddNetwork },
+                    onAddGroup = { storeDialog = StorageDialog.AddGroup },
+                    onManageGroups = { storeDialog = StorageDialog.ManageGroups },
+                    onSettings = { page = Page.Settings; scope.launch { drawerState.close() } },
+                    onOpenTool = { tool ->
+                        page = when (tool) {
+                            SideTool.PLUGINS -> Page.Plugins
+                            SideTool.REMOTE -> Page.Remote
+                            SideTool.APPS -> Page.Apps
+                            SideTool.EDITOR -> {
+                                val tmp = File(context.cacheDir, "未命名-${System.currentTimeMillis() / 1000}.txt")
+                                runCatching { tmp.createNewFile() }
+                                editorOrigin = Offset.Zero
+                                editorTarget = tmp
+                                Page.Files
+                            }
+                            SideTool.TERMINAL -> Page.Terminal
+                            SideTool.MCP -> Page.Mcp
+                            SideTool.MORE -> Page.Files
+                        }
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpenMore = { tool ->
+                        page = when (tool) {
+                            MoreTool.COLOR -> Page.ColorPick
+                            MoreTool.SIGN -> Page.Signing
+                            MoreTool.SMALI -> Page.SmaliRef
+                            MoreTool.PASSWORD -> Page.Passwords
+                            MoreTool.MUSIC -> Page.Music
+                            MoreTool.STREAM -> Page.Stream
+                            MoreTool.PAYLOAD -> Page.Payload
+                        }
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpenNetwork = { net ->
+                        networkTarget = net
+                        scope.launch { drawerState.close() }
+                    },
+                    onRemoveLocal = { StorageBook.removeLocal(it) },
+                    onRemoveNetwork = { StorageBook.removeNetwork(it) }
+                )
+            }
         }
     ) {
         Box(Modifier.fillMaxSize().background(SunColors.Bg)) {
@@ -592,6 +646,24 @@ fun MainScreen(
                     Page.Inspect -> InspectPage(onBack = { page = Page.Settings })
 
                     Page.MtPlugins -> MtPluginPage(onBack = { page = Page.Settings })
+
+                    Page.Apps -> AppsPage(onBack = { page = Page.Files })
+
+                    Page.Remote -> RemotePage(onBack = { page = Page.Files }, defaultRoot = pane.path)
+
+                    Page.Signing -> SigningPage(onBack = { page = Page.Files })
+
+                    Page.SmaliRef -> SmaliRefPage(onBack = { page = Page.Files })
+
+                    Page.Passwords -> PasswordPage(onBack = { page = Page.Files })
+
+                    Page.Stream -> StreamPage(onBack = { page = Page.Files })
+
+                    Page.Payload -> PayloadPage(onBack = { page = Page.Files })
+
+                    Page.ColorPick -> ColorPickerPage(onBack = { page = Page.Files })
+
+                    Page.Music -> MusicPage(onBack = { page = Page.Files })
 
                     Page.Trash -> {
                         val items = remember(trashTick) { vm.trashItems() }
@@ -1121,11 +1193,116 @@ fun MainScreen(
         }
     }
 
+    // 侧边栏：添加存储 / 分组管理
+    storeDialog?.let { kind ->
+        val store by StorageBook.config.collectAsStateWithLifecycle()
+        StorageDialogHost(
+            kind = kind,
+            groups = store.groups,
+            onDismiss = { storeDialog = null },
+            onAddLocal = { name, path ->
+                val ok = StorageBook.addLocal(name, path)
+                Toast.makeText(context, if (ok) "已添加本地存储" else "路径已存在", Toast.LENGTH_SHORT).show()
+                storeDialog = null
+            },
+            onAddNetwork = { name, uri, group ->
+                val ok = StorageBook.addNetwork(name, uri, group)
+                Toast.makeText(context, if (ok) "已添加网络存储" else "链接已存在", Toast.LENGTH_SHORT).show()
+                storeDialog = null
+            },
+            onAddGroup = { name ->
+                val ok = StorageBook.addGroup(name)
+                Toast.makeText(context, if (ok) "已创建分组「$name」" else "分组已存在", Toast.LENGTH_SHORT).show()
+                storeDialog = null
+            },
+            onRenameGroup = { from, to ->
+                val ok = StorageBook.renameGroup(from, to)
+                if (!ok) Toast.makeText(context, "重命名失败", Toast.LENGTH_SHORT).show()
+            },
+            onDeleteGroup = { StorageBook.removeGroup(it) }
+        )
+    }
+
+    // 网络存储：只有名称和链接，点开就是链接本身
+    networkTarget?.let { net ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { networkTarget = null },
+            containerColor = SunColors.Surface2,
+            shape = SunShapes.Medium,
+            title = { Text(net.name, color = SunColors.TextPrimary, fontSize = 15.sp) },
+            text = {
+                Column {
+                    Text(
+                        net.uri,
+                        color = SunColors.Accent,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("分组：${net.group}", color = SunColors.TextTertiary, fontSize = 10.sp)
+                }
+            },
+            confirmButton = {
+                Row {
+                    Text(
+                        "打开",
+                        color = SunColors.Accent,
+                        fontSize = 12.5.sp,
+                        modifier = Modifier
+                            .clip(SunShapes.Small)
+                            .clickable {
+                                val uri = net.uri
+                                val ok = runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(normalizeLink(uri)))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }.isSuccess
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "已交给系统打开" else "没有能打开该链接的应用",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                networkTarget = null
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                    Text(
+                        "复制",
+                        color = SunColors.Accent,
+                        fontSize = 12.5.sp,
+                        modifier = Modifier
+                            .clip(SunShapes.Small)
+                            .clickable {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("network", net.uri))
+                                Toast.makeText(context, "链接已复制", Toast.LENGTH_SHORT).show()
+                                networkTarget = null
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            },
+            dismissButton = {
+                Text(
+                    "关闭",
+                    color = SunColors.TextSecondary,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier
+                        .clip(SunShapes.Small)
+                        .clickable { networkTarget = null }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        )
+    }
+
     // 搜索弹窗
     if (searchOpen) {
         SearchDialog(
             state = searchState,
             history = prefs.recentSearches,
+            favorites = prefs.searchFavorites,
             onDismiss = { searchOpen = false },
             onQueryChange = { vm.updateQuery(it) },
             onOptionsChange = { vm.setSearchOptions(it) },
@@ -1136,7 +1313,10 @@ fun MainScreen(
                 vm.revealPath(entry)
             },
             onHistoryPick = { vm.updateQuery(it) },
-            onClearHistory = { vm.prefsStore.clearSearches() }
+            onClearHistory = { vm.prefsStore.clearSearches() },
+            onToggleFavorite = { vm.prefsStore.toggleSearchFavorite(it) },
+            onRemoveFavorite = { vm.prefsStore.removeSearchFavorite(it) },
+            onClearFavorites = { vm.prefsStore.clearSearchFavorites() }
         )
     }
 
@@ -1366,7 +1546,6 @@ private fun FilesPage(
     Column(
         Modifier
             .fillMaxSize()
-            .statusBarsPadding()
             .navigationBarsPadding()
     ) {
         TopBar(
@@ -1537,21 +1716,13 @@ private fun TopBar(
     onToggleBookmark: (String) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val hairline = SunColors.Hairline
     Row(
         Modifier
             .fillMaxWidth()
+            .background(SunColors.TopBar)
+            // 底色先铺满，再让状态栏高度算进栏内 —— 顶栏颜色一直延伸到屏幕最上沿
+            .statusBarsPadding()
             .height(Mt.BarHeight)
-            .background(SunColors.Surface1)
-            .drawBehind {
-                val stroke = 0.6.dp.toPx()
-                drawLine(
-                    hairline,
-                    Offset(0f, size.height - stroke / 2),
-                    Offset(size.width, size.height - stroke / 2),
-                    stroke
-                )
-            }
             .padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1560,7 +1731,7 @@ private fun TopBar(
             interactionSource = interaction,
             modifier = Modifier.size(46.dp).pressScale(interaction, 0.88f)
         ) {
-            HamburgerIcon(open = drawerOpen, tint = SunColors.TextPrimary, modifier = Modifier.size(22.dp))
+            HamburgerIcon(open = drawerOpen, tint = SunColors.OnTopBar, modifier = Modifier.size(22.dp))
         }
 
         Column(
@@ -1581,7 +1752,7 @@ private fun TopBar(
                 val shown = path.ifEmpty { "/" }
                 Text(
                     shown,
-                    color = SunColors.TextPrimary,
+                    color = SunColors.OnTopBar,
                     fontSize = Mt.titleSize(shown.length),
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.sp,
@@ -1594,7 +1765,7 @@ private fun TopBar(
             // MT 的副标题就是一行纯文字，不挂图标，读起来更快
             Text(
                 "${pane.dirCount} 文件夹 · ${pane.fileCount} 文件 · ${Fmt.sizeCompact(storageUsed)}/${Fmt.sizeCompact(storageTotal)}",
-                color = SunColors.TextTertiary,
+                color = SunColors.OnTopBarMuted,
                 fontSize = Mt.BarMeta,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1606,7 +1777,7 @@ private fun TopBar(
                 Icon(
                     Icons.Outlined.MoreVert,
                     contentDescription = "工具栏",
-                    tint = SunColors.TextPrimary,
+                    tint = SunColors.OnTopBar,
                     modifier = Modifier.size(21.dp)
                 )
             }
@@ -1756,7 +1927,8 @@ private fun GrantBanner(onRequestAccess: () -> Unit) {
  */
 @Composable
 private fun PaneDivider() {
-    Box(Modifier.width(1.dp).fillMaxHeight().background(SunColors.Hairline))
+    // 两栏之间用 2dp 高对比线切开：暗色下近黑、亮色下深灰，边界一目了然
+    Box(Modifier.width(2.dp).fillMaxHeight().background(SunColors.PaneDivider))
 }
 
 @Composable
@@ -2378,201 +2550,17 @@ private fun BusyBar(op: com.suibian.sunfile.vm.OpState, modifier: Modifier = Mod
     }
 }
 
-// ---------------- 侧边栏 ----------------
-
-@Composable
-private fun DrawerContent(
-    currentPath: String,
-    version: String,
-    storageUsed: Long,
-    storageTotal: Long,
-    bookmarks: List<String>,
-    recent: List<String>,
-    onNavigate: (String) -> Unit,
-    onBookmarks: () -> Unit,
-    onSettings: () -> Unit,
-    onCheckUpdate: () -> Unit,
-    onAbout: () -> Unit,
-    onTerminal: () -> Unit = {},
-    onSaf: (String) -> Unit = {},
-    onSysInfo: () -> Unit = {}
-) {
-    val shortcuts = listOf(
-        Triple("内部存储", "/storage/emulated/0", Icons.Outlined.Storage),
-        Triple("下载", "/storage/emulated/0/Download", Icons.Outlined.Download),
-        Triple("文档", "/storage/emulated/0/Documents", Icons.Outlined.Description),
-        Triple("图片", "/storage/emulated/0/Pictures", Icons.Outlined.Image),
-        Triple("音乐", "/storage/emulated/0/Music", Icons.Outlined.MusicNote),
-        Triple("电影", "/storage/emulated/0/Movies", Icons.Outlined.VideoLibrary),
-        Triple("根目录", "/", Icons.Outlined.Folder)
-    )
-    val existing = shortcuts.filter { File(it.second).isDirectory }
-    ModalDrawerSheet(
-        drawerContainerColor = SunColors.Surface1,
-        drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
-        modifier = Modifier.width(306.dp)
-    ) {
-        Column(Modifier.fillMaxHeight().statusBarsPadding()) {
-            // 头部固定：应用名 + 存储占用，滚动区只放导航
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(34.dp)
-                            .clip(SunShapes.Small)
-                            .background(SunColors.Accent),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("S", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text("SunDocument", color = SunColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text("v$version · 双栏文件管理", color = SunColors.TextTertiary, fontSize = 10.sp)
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-                val free = (storageTotal - storageUsed).coerceAtLeast(0L)
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        Fmt.size(storageUsed),
-                        color = SunColors.TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        " 已用",
-                        color = SunColors.TextTertiary,
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "${Fmt.size(free)} 可用",
-                        color = SunColors.TextSecondary,
-                        fontSize = 11.sp
-                    )
-                }
-                Spacer(Modifier.height(7.dp))
-                LinearProgressIndicator(
-                    progress = { if (storageTotal > 0) storageUsed.toFloat() / storageTotal else 0f },
-                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
-                    color = SunColors.Accent,
-                    trackColor = SunColors.Surface3
-                )
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    "共 ${Fmt.size(storageTotal)}",
-                    color = SunColors.TextTertiary,
-                    fontSize = 10.sp
-                )
-            }
-
-            Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
-
-            // 导航区可滚动：项目再多也不会把底部入口挤出屏幕
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                SectionLabel("快速访问")
-                existing.forEach { (label, path, icon) ->
-                    DrawerItem(
-                        icon = icon,
-                        label = label,
-                        selected = currentPath == path,
-                        onClick = { onNavigate(path) }
-                    )
-                }
-
-                if (recent.isNotEmpty()) {
-                    SectionLabel("最近访问")
-                    recent.filter { it != currentPath }.take(4).forEach { path ->
-                        DrawerItem(
-                            icon = Icons.Outlined.History,
-                            label = compactPath(path),
-                            selected = false,
-                            onClick = { onNavigate(path) }
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
-                Spacer(Modifier.height(6.dp))
-
-                DrawerItem(
-                    Icons.Outlined.BookmarkBorder,
-                    if (bookmarks.isEmpty()) "收藏夹" else "收藏夹（${bookmarks.size}）",
-                    false,
-                    onBookmarks
-                )
-                DrawerItem(Icons.Outlined.Terminal, "终端", false, onTerminal)
-                DrawerItem(Icons.Outlined.FolderOpen, "Android/data", false) { onSaf("primary:Android/data") }
-                DrawerItem(Icons.Outlined.FolderOpen, "Android/obb", false) { onSaf("primary:Android/obb") }
-                DrawerItem(Icons.Outlined.Info, "系统信息", false, onSysInfo)
-                DrawerItem(Icons.Outlined.Settings, "设置", false, onSettings)
-                DrawerItem(Icons.Outlined.SystemUpdate, "检查更新", false, onCheckUpdate)
-                DrawerItem(Icons.Outlined.Info, "关于", false, onAbout)
-                Spacer(Modifier.height(14.dp))
-            }
-
-            Box(Modifier.fillMaxWidth().height(1.dp).background(SunColors.Hairline))
-            Text(
-                "github.com/suibian-sun/SunDocument",
-                color = SunColors.TextTertiary,
-                fontSize = 9.sp,
-                modifier = Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        color = SunColors.TextTertiary,
-        fontSize = 10.sp,
-        letterSpacing = 0.4.sp,
-        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp)
-    )
-}
-
-@Composable
-private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 1.dp)
-            .clip(SunShapes.Small)
-            .background(if (selected) SunColors.AccentSoft else Color.Transparent)
-            .pressScale(interaction, 0.98f)
-            .clickable(interactionSource = interaction, indication = LocalIndication.current) { onClick() }
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            icon,
-            null,
-            tint = if (selected) SunColors.Accent else SunColors.TextSecondary,
-            modifier = Modifier.size(19.dp)
-        )
-        Spacer(Modifier.width(13.dp))
-        Text(
-            label,
-            color = if (selected) SunColors.Accent else SunColors.TextPrimary,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
 // ---------------- 工具函数 ----------------
+
+/** smb / ftp / webdav 这些自定义 scheme 系统浏览器认不出，转成可打开的等价链接 */
+private fun normalizeLink(uri: String): String {
+    val lower = uri.lowercase()
+    return when {
+        lower.startsWith("webdav://") -> "http://" + uri.substringAfter("://")
+        lower.startsWith("webdavs://") -> "https://" + uri.substringAfter("://")
+        else -> uri
+    }
+}
 
 /** 长路径中段省略，保留可读的尾部目录名 */
 internal fun compactPath(path: String): String {

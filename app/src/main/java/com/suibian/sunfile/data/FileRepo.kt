@@ -3,6 +3,8 @@ package com.suibian.sunfile.data
 import android.os.Environment
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -112,16 +114,31 @@ object FileRepo {
         for (n in names) {
             if (!showHidden && n.startsWith(".")) continue
             val f = File(dir, n)
-            val isDir = try { f.isDirectory } catch (e: Exception) { false }
-            val len = try { if (isDir) 0L else f.length() } catch (e: Exception) { 0L }
+            // 一次 stat 同时拿到类型 / 大小 / 修改时间，避免每项 3 次独立系统调用。
+            // 千级目录下这一处能省下几千次 syscall，滚动前的等待明显缩短。
+            val st = runCatching { Os.stat(f.absolutePath) }.getOrNull()
+            val isDir = if (st != null) {
+                (st.st_mode and OsConstants.S_IFMT) == OsConstants.S_IFDIR
+            } else {
+                try { f.isDirectory } catch (e: Exception) { false }
+            }
+            val len = when {
+                isDir -> 0L
+                st != null -> st.st_size
+                else -> try { f.length() } catch (e: Exception) { 0L }
+            }
+            val mtime = when {
+                st != null -> st.st_mtime * 1000L
+                else -> try { f.lastModified() } catch (e: Exception) { 0L }
+            }
             result.add(
                 FileEntry(
                     file = f,
                     name = n,
                     isDir = isDir,
                     size = len,
-                    lastModified = try { f.lastModified() } catch (e: Exception) { 0L },
-                    isHidden = n.startsWith(".") || try { f.isHidden } catch (e: Exception) { false },
+                    lastModified = mtime,
+                    isHidden = n.startsWith("."),
                     canRead = try { f.canRead() } catch (e: Exception) { false },
                     canWrite = try { f.canWrite() } catch (e: Exception) { false }
                 )

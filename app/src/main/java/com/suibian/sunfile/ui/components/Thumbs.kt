@@ -2,6 +2,7 @@ package com.suibian.sunfile.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.media.MediaMetadataRetriever
 import android.util.LruCache
 import androidx.compose.runtime.Composable
@@ -90,19 +91,31 @@ object Thumbs {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
-            // 取第 0.5 秒，避开部分视频开头的纯黑帧
-            val frame = retriever.getFrameAtTime(500_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            // 取第 0.5 秒，避开部分视频开头的纯黑帧。
+            // API 27+ 直接按目标尺寸解码：4K 视频不再先解一张 3840×2160 再缩，
+            // 单帧内存从 30MB 降到几十 KB。
+            val frame = if (Build.VERSION.SDK_INT >= 27) {
+                runCatching {
+                    retriever.getScaledFrameAtTime(
+                        500_000,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        TARGET,
+                        TARGET
+                    )
+                }.getOrNull()
+            } else null
+            val full = frame ?: retriever.getFrameAtTime(500_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.frameAtTime
                 ?: return null
-            val max = maxOf(frame.width, frame.height)
-            if (max <= TARGET) frame else {
+            val max = maxOf(full.width, full.height)
+            if (max <= TARGET) full else {
                 val scale = TARGET.toFloat() / max
                 Bitmap.createScaledBitmap(
-                    frame,
-                    (frame.width * scale).toInt().coerceAtLeast(1),
-                    (frame.height * scale).toInt().coerceAtLeast(1),
+                    full,
+                    (full.width * scale).toInt().coerceAtLeast(1),
+                    (full.height * scale).toInt().coerceAtLeast(1),
                     true
-                ).also { if (it !== frame) frame.recycle() }
+                ).also { if (it !== full) full.recycle() }
             }
         } catch (e: Throwable) {
             null

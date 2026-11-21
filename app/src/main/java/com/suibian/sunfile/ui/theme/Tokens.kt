@@ -65,54 +65,62 @@ data class SunPalette(
     val CodeComment: Color,
     val CodeNumber: Color,
     val CodeAnnotation: Color,
-    val CodeTag: Color
+    val CodeTag: Color,
+    /** 顶部导航栏底色：始终比页面底色更暗，形成「栏 / 面」两层 */
+    val TopBar: Color = Bg,
+    /** 顶栏前景：两种模式下顶栏都是深色，文字固定用亮色 */
+    val OnTopBar: Color = TextPrimary,
+    val OnTopBarMuted: Color = TextSecondary,
+    /** 双栏之间的高对比分割线 */
+    val PaneDivider: Color = Hairline
 )
 
 val DarkPalette = SunPalette(
     dark = true,
-    // 深炭灰：不是 OLED 纯黑，而是带微弱明度的深灰（L*≈10）。
-    // 屏幕上呈现磨砂玻璃 / 暗夜石材的微颗粒质感，低流明杜绝眩光。
-    // 与 Surface1 之间约 3% 明度差营造「后退感」——列表内容悬浮在暗色空间前端。
-    Bg = Color(0xFF1B1C1E),
-    Surface1 = Color(0xFF222326),
-    Surface2 = Color(0xFF28292C),
-    Surface3 = Color(0xFF2F3034),
-    Surface4 = Color(0xFF37383C),
-    // 分割线与底色几乎同明度 → 边界消隐，布局连贯不被打断
-    Hairline = Color(0xFF222326),
-    TextPrimary = Color(0xFFE8E9EB),
-    TextSecondary = Color(0xFF9B9EA3),
-    TextTertiary = Color(0xFF6B6E74),
+    // 页面底色 #303030：中性灰，不偏蓝也不偏暖。
+    // 与顶栏 #151515 形成明确的两层结构，长时间阅读不刺眼。
+    Bg = Color(0xFF303030),
+    Surface1 = Color(0xFF383839),
+    Surface2 = Color(0xFF3D3D3F),
+    Surface3 = Color(0xFF454547),
+    Surface4 = Color(0xFF4E4E50),
+    // 行内细分割：比底色略亮，用于列表行之间
+    Hairline = Color(0xFF3C3C3E),
+    TextPrimary = Color(0xFFF2F3F5),
+    TextSecondary = Color(0xFFAFB2B7),
+    TextTertiary = Color(0xFF82858B),
     Accent = Color(0xFF4A90F7),
     AccentSoft = Color(0x334A90F7),
     AccentLine = Color(0xFF2F6AB8),
     Folder = Color(0xFFF0B23E),
-    File = Color(0xFF7E8895),
+    File = Color(0xFF8B949F),
     Danger = Color(0xFFE5534B),
     Success = Color(0xFF3FB950),
     Warning = Color(0xFFD9A93F),
     Scrim = Color(0xCC000000),
     CodeKeyword = Color(0xFFC792EA),
     CodeString = Color(0xFF9ECE6A),
-    CodeComment = Color(0xFF5F6B76),
+    CodeComment = Color(0xFF6B7682),
     CodeNumber = Color(0xFFE0AF68),
     CodeAnnotation = Color(0xFF7DCFFF),
-    CodeTag = Color(0xFF7DCFFF)
+    CodeTag = Color(0xFF7DCFFF),
+    TopBar = Color(0xFF151515),
+    OnTopBar = Color(0xFFF5F6F8),
+    OnTopBarMuted = Color(0xFF9DA1A7),
+    // 深灰底上用近黑细线：两栏一眼分开，不靠彩色
+    PaneDivider = Color(0xFF101010)
 )
 
 val LightPalette = SunPalette(
     dark = false,
-    // 极致纯白：高级铜版纸 / 白瓷的平滑质感。
-    // 高流明漫反射 + 深色文字 = 最极端明暗对比，信息获取效率拉满。
-    // 大面积留白（Negative Space）带来呼吸感与轻量化极简美学。
-    Bg = Color(0xFFFFFFFF),
+    // 页面底色 #FAFAFA：接近纯白但不反光过曝，长时间阅读更稳。
+    Bg = Color(0xFFFAFAFA),
     Surface1 = Color(0xFFFFFFFF),
-    Surface2 = Color(0xFFF7F8FA),
-    Surface3 = Color(0xFFEEF0F3),
+    Surface2 = Color(0xFFF2F3F5),
+    Surface3 = Color(0xFFE9EBEE),
     Surface4 = Color(0xFFFFFFFF),
-    // 浅色分割线在纯白画布上清晰锐利 → 绝对切割与秩序感
-    Hairline = Color(0xFFE2E4E8),
-    TextPrimary = Color(0xFF0F1114),
+    Hairline = Color(0xFFE3E5E9),
+    TextPrimary = Color(0xFF111315),
     TextSecondary = Color(0xFF565B62),
     TextTertiary = Color(0xFF8B9098),
     Accent = Color(0xFF1565D8),
@@ -129,7 +137,13 @@ val LightPalette = SunPalette(
     CodeComment = Color(0xFF9AA1A9),
     CodeNumber = Color(0xFF9A6700),
     CodeAnnotation = Color(0xFF1D6FD0),
-    CodeTag = Color(0xFFC13B2E)
+    CodeTag = Color(0xFFC13B2E),
+    // 白天的顶栏同样是深灰 #303030：内容区亮、控制区暗，层级一眼可辨
+    TopBar = Color(0xFF303030),
+    OnTopBar = Color(0xFFF5F6F8),
+    OnTopBarMuted = Color(0xFFB9BCC1),
+    // 近白画布上的深色切割线，秩序感来自这条线本身
+    PaneDivider = Color(0xFF2B2B2B)
 )
 
 private val LocalSunPalette = staticCompositionLocalOf { DarkPalette }

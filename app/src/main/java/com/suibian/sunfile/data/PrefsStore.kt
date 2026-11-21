@@ -23,7 +23,9 @@ data class AppPrefs(
     /** 最近访问过的目录，最新在前 */
     val recent: List<String> = emptyList(),
     /** 最近搜索过的关键词，最新在前 */
-    val recentSearches: List<String> = emptyList()
+    val recentSearches: List<String> = emptyList(),
+    /** 搜索收藏：常用关键词 / 路径，点击直接填进输入框 */
+    val searchFavorites: List<String> = emptyList()
 )
 
 /**
@@ -67,7 +69,9 @@ class PrefsStore private constructor(context: Context) {
         bookmarks = (sp.getString("bookmarks", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct(),
         recent = (sp.getString("recent", "") ?: "").split('\n').filter { it.isNotBlank() }.distinct().take(20),
         recentSearches = (sp.getString("recent_search", "") ?: "")
-            .split('\n').filter { it.isNotBlank() }.distinct().take(15)
+            .split('\n').filter { it.isNotBlank() }.distinct().take(15),
+        searchFavorites = (sp.getString("search_favorites", "") ?: "")
+            .split('\n').filter { it.isNotBlank() }.distinct().take(50)
     )
 
     private fun decodeOpenWith(raw: String): Map<String, OpenMode> {
@@ -145,6 +149,32 @@ class PrefsStore private constructor(context: Context) {
         sp.edit().putString("recent_search", trimmed.joinToString("\n")).apply()
     }
 
+    /** 收藏 / 取消收藏一个搜索词，返回操作后是否处于收藏状态 */
+    fun toggleSearchFavorite(keyword: String): Boolean {
+        val k = keyword.trim()
+        if (k.isBlank()) return false
+        val list = _prefs.value.searchFavorites.toMutableList()
+        val added = if (list.contains(k)) {
+            list.remove(k); false
+        } else {
+            list.add(0, k); true
+        }
+        _prefs.value = _prefs.value.copy(searchFavorites = list)
+        sp.edit().putString("search_favorites", list.joinToString("\n")).apply()
+        return added
+    }
+
+    fun removeSearchFavorite(keyword: String) {
+        val list = _prefs.value.searchFavorites.filterNot { it == keyword }
+        _prefs.value = _prefs.value.copy(searchFavorites = list)
+        sp.edit().putString("search_favorites", list.joinToString("\n")).apply()
+    }
+
+    fun clearSearchFavorites() {
+        _prefs.value = _prefs.value.copy(searchFavorites = emptyList())
+        sp.edit().putString("search_favorites", "").apply()
+    }
+
     fun clearSearches() {
         _prefs.value = _prefs.value.copy(recentSearches = emptyList())
         sp.edit().putString("recent_search", "").apply()
@@ -184,6 +214,7 @@ class PrefsStore private constructor(context: Context) {
             .putString("bookmarks", next.bookmarks.joinToString("\n"))
             .putString("recent", next.recent.joinToString("\n"))
             .putString("recent_search", next.recentSearches.joinToString("\n"))
+            .putString("search_favorites", next.searchFavorites.joinToString("\n"))
             .apply()
     }
 }

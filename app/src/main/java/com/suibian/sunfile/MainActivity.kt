@@ -54,10 +54,10 @@ class MainActivity : ComponentActivity() {
             val prefs by prefsStore.prefs.collectAsStateWithLifecycle()
             val dark = prefs.themeMode.isDark(androidx.compose.foundation.isSystemInDarkTheme())
 
-            // 状态栏图标随主题反色，避免浅色下白字看不见
+            // 两种模式的顶栏都是深灰（#151515 / #303030），状态栏与导航栏图标固定用亮色
             SideEffect {
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-                    .isAppearanceLightStatusBars = !dark
+                    .isAppearanceLightStatusBars = false
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView)
                     .isAppearanceLightNavigationBars = !dark
             }

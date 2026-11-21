@@ -1,6 +1,7 @@
 package com.suibian.sunfile.data
 
 import android.os.StatFs
+import android.os.SystemClock
 import java.io.File
 
 /** 当前路径所在文件系统的容量信息 */
@@ -10,10 +11,40 @@ data class StorageInfo(val total: Long, val available: Long) {
 }
 
 object StorageStats {
-    fun of(path: String): StorageInfo? = runCatching {
-        val stat = StatFs(if (path.isEmpty()) "/" else path)
-        StorageInfo(stat.totalBytes, stat.availableBytes)
-    }.getOrNull()
+
+    /**
+     * statfs 是系统调用，返回栏、侧边栏、顶栏副标题都会问一次。
+     * 800ms 内复用同一个结果：同一帧里多少次读取都只打一次系统调用，
+     * 又不会让容量数字明显滞后。
+     */
+    private const val TTL_MS = 800L
+    private val cache = HashMap<String, Pair<Long, StorageInfo>>()
+
+    fun of(path: String): StorageInfo? {
+        val key = if (path.isEmpty()) "/" else path
+        val now = SystemClock.elapsedRealtime()
+        synchronized(cache) {
+            cache[key]?.let { (stamp, info) ->
+                if (now - stamp < TTL_MS) return info
+            }
+        }
+        val info = runCatching {
+            val stat = StatFs(key)
+            StorageInfo(stat.totalBytes, stat.availableBytes)
+        }.getOrNull() ?: return null
+        synchronized(cache) {
+            if (cache.size > 32) cache.clear()
+            cache[key] = now to info
+        }
+        return info
+    }
+
+    /** 写入/删除大文件后主动失效，让下一次读取拿到新值 */
+    fun invalidate(path: String? = null) {
+        synchronized(cache) {
+            if (path == null) cache.clear() else cache.remove(if (path.isEmpty()) "/" else path)
+        }
+    }
 
     /** 当前目录直属的文件夹 / 文件数量 */
     fun count(entries: List<FileEntry>): Pair<Int, Int> {

@@ -21,6 +21,7 @@
 └────────────────────────────────────────────────────────────┘
 ```
 
+- **侧边栏**：顶部固定导航（Logo、名称、明暗切换、竖向三点），三点菜单含 主题跟随系统 / 添加网络存储 / 添加本地存储 / 添加网络分组 / 管理工具分组 / 设置；下方依次为 **本地存储**（根目录、内部存储与自建路径，各带容量进度条与已用/剩余）、**网络存储**（只显示名称与链接，可按组折叠）、**工具**（插件管理、远程管理、已安装应用、文本编辑器、终端模拟器、Mcp 服务、更多工具）。
 - **顶栏**：`☰` 侧边栏；中间是**当前聚焦栏**的绝对路径（17sp 中等字重，路径变长自动降到 15/13sp）与「文件夹数 · 文件数 · 已用/总容量」，副标题是一行纯文字，不挂图标；右侧 `⋮` 展开工具栏。
 - **双栏**：各自维护路径、历史栈、选中项与**滚动位置**。手指按下或移到哪一栏，哪一栏就获得焦点；聚焦栏用整片底色差 + 内容不透明度（1.0 / 0.86）区分，没有栏头路径、没有 A/B 标签、也没有高亮线。
 - **`..` 行**：每栏顶部固定一行，用与普通文件夹相同的实心图标，点击回上一级。
@@ -310,7 +311,7 @@ app/src/main/java/com/suibian/sunfile/
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew assembleRelease -PappVersionName=1.6.1 -PappVersionCode=23
+./gradlew assembleRelease -PappVersionName=1.7.0 -PappVersionCode=24
 ```
 
 正式签名通过环境变量注入（缺省回退 debug 签名）：`SIGNING_KEYSTORE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
@@ -321,7 +322,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 发布流程
 
 1. 推送到 `main`：CI 运行单元测试、编译、验签，产物作为 artifact 上传；
-2. `git tag v1.6.1 && git push origin v1.6.1`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
+2. `git tag v1.7.0 && git push origin v1.7.0`：CI 创建 GitHub Release 并附 APK + SHA256SUMS；
 3. 已安装旧版本的用户打开应用即收到更新提示。
 
 `versionName` 取自 tag，`versionCode` 取自 `github.run_number`，保证单调递增。
@@ -356,6 +357,7 @@ export ANDROID_HOME=/path/to/android-sdk
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 1.7.0 | 侧边栏重做（顶部导航 + 本地存储容量条 + 网络存储分组 + 工具区）；九件新工具：已安装应用、远程管理、签名密钥、Smali 指令、常用密码、音乐播放器、流媒体、远程 Payload、屏幕取色；搜索历史七条下拉 + 我的收藏；页面底色 #303030 / #FAFAFA，顶栏 #151515 / #303030，双栏 2dp 高对比分割线 |
 | 1.6.1 | 深炭灰暗色主题（非纯黑磨砂质感）与纯白亮色主题（极致对比、留白呼吸感）；聚焦栏明暗分层；分割线暗色消隐、亮色锐利 |
 | 1.6.0 | Smali 编辑（反汇编 classesN.dex、改完汇编回写、自动重签）；插件 `libs/*.jar` 支持（class 解析 + JVM 字节码解释器） |
 | 1.5.0 | MT 插件直装直用（Java 源码解释器 + `bin.mt.plugin.api` 宿主实现，翻译引擎 / 设置界面 / 本地化文本）；清单编辑（AXML 回编译并写回 APK）；APK 重签名（v1+v2+v3，运行时自签证书） |
