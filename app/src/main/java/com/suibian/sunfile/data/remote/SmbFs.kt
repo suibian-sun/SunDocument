@@ -79,7 +79,7 @@ class SmbFs(private val t: RemoteTarget, timeoutSec: Int) : RemoteFs {
             // 链接里直接写共享名（smb://user:pass@host/share）就不会走这里。
             val out = ArrayList<RemoteEntry>()
             for (name in COMMON_SHARES) {
-                val ok = runCatching { connect(name) }.isSuccess
+                val ok = runCatching { share(name) }.isSuccess
                 if (ok) out.add(RemoteEntry(name, "/$name", true))
             }
             if (out.isEmpty()) {

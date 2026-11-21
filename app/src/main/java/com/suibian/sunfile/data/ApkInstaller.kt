@@ -113,6 +113,9 @@ object ApkInstaller {
         if (prefs.verifyApk && check != null) {
             return@withContext Outcome.Failed(Channel.SYSTEM, check)
         }
+        // 装了 Shizuku 但还没授权时，先弹一次授权框；用户拒绝就按剩余通道走
+        if (prefs.installViaShizuku && !ShizukuBridge.usable()) ensureShizukuPermission()
+
         var last: Outcome? = null
         for (channel in plan(prefs, context)) {
             val r = when (channel) {
@@ -133,6 +136,23 @@ object ApkInstaller {
             last = r
         }
         last ?: Outcome.Failed(Channel.SYSTEM, "没有可用的安装通道")
+    }
+
+    /** 同步等待 Shizuku 授权结果，最多 30 秒；失败不抛异常，交给后续通道兜底 */
+    private fun ensureShizukuPermission(): Boolean {
+        if (ShizukuBridge.usable()) return true
+        if (!ShizukuBridge.running()) return false
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var granted = false
+        val listener: (Boolean) -> Unit = {
+            granted = it
+            latch.countDown()
+        }
+        ShizukuBridge.addResultListener(listener)
+        ShizukuBridge.requestPermission()
+        runCatching { latch.await(30, TimeUnit.SECONDS) }
+        ShizukuBridge.removeResultListener(listener)
+        return granted && ShizukuBridge.usable()
     }
 
     // ---------------- 具体通道 ----------------
