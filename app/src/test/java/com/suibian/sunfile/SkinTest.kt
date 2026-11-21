@@ -37,12 +37,14 @@ class SkinTest {
     }
 
     @Test
-    fun animePaletteLetsTheWallpaperThrough() {
-        assertTrue("二次元模板要标记为半透明色板", Skins.Anime.anime)
+    fun wallpaperOnlyShowsThroughTheChrome() {
+        assertTrue("二次元模板要标记为蓝系色板", Skins.Anime.anime)
+        // 底色留一点透光，壁纸才会在页面空白处显出氛围
         assertTrue("深色底必须留出透明度", com.suibian.sunfile.ui.theme.AnimeDark.Bg.alpha < 1f)
         assertTrue("浅色底必须留出透明度", com.suibian.sunfile.ui.theme.AnimeLight.Bg.alpha < 1f)
-        // 面板也不能完全不透明，否则壁纸只会在页面缝隙里露一条边
-        assertTrue(com.suibian.sunfile.ui.theme.AnimeDark.Surface1.alpha < 1f)
+        // 但列表卡片必须完全不透明 —— 这是可读性的下限，比「看得见壁纸」重要
+        assertEquals(1f, com.suibian.sunfile.ui.theme.AnimeLight.Surface1.alpha)
+        assertEquals(1f, com.suibian.sunfile.ui.theme.AnimeDark.Surface1.alpha)
         // 顶栏两端不同色，才会出现渐变
         assertTrue(
             com.suibian.sunfile.ui.theme.AnimeDark.TopBarGradientStart !=
@@ -51,6 +53,26 @@ class SkinTest {
         // 中性模板不能跟着变透明，否则老用户升级后会觉得「背景漏了」
         assertTrue(!Skins.Classic.anime)
         assertEquals(1f, com.suibian.sunfile.ui.theme.DarkPalette.Bg.alpha)
+    }
+
+    @Test
+    fun semanticColorsNeverSwapRoles() {
+        val light = com.suibian.sunfile.ui.theme.AnimeLight
+        // 删除必须用红，不能是点缀粉：两者一旦混用，「粉=危险」的误读会传遍全站
+        assertTrue("危险色应是红而不是粉", light.Danger != light.AccentPink)
+        assertTrue("危险色必须不透明，弹窗里不能透底", light.Danger.alpha == 1f)
+        // 蓝只表示可操作/选中/进度，主蓝不能被拿去当危险色
+        assertTrue(light.Accent != light.Danger)
+        // 选中底要能看清文件名：必须很浅，不能是主蓝本色
+        assertTrue("选中底不能等于主蓝", light.Selected != light.Accent)
+        assertTrue(
+            "选中底必须足够浅（亮度接近白）",
+            light.Selected.red > 0.85f && light.Selected.green > 0.88f && light.Selected.blue > 0.9f
+        )
+        // 深色模式同样成立
+        val dark = com.suibian.sunfile.ui.theme.AnimeDark
+        assertTrue(dark.Danger != dark.AccentPink)
+        assertTrue(dark.Accent != dark.Danger)
     }
 
     @Test

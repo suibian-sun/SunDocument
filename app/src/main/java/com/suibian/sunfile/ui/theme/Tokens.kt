@@ -79,7 +79,25 @@ data class SunPalette(
     val PaneDivider: Color = Hairline,
     /** 顶栏渐变起点/终点：两者相同则画成纯色，避免无谓的分支 */
     val TopBarGradientStart: Color = TopBar,
-    val TopBarGradientEnd: Color = TopBar
+    val TopBarGradientEnd: Color = TopBar,
+
+    // ---- 工具型界面的语义色 ----
+    // 命名刻意和"装饰色"分开：蓝只表示可操作/选中/进度，
+    // 粉只做收藏与角色点缀，危险一律走 Danger，三者互不串用。
+    /** 选中底：多选、当前项。比 AccentSoft 更实，压得住白底列表 */
+    val Selected: Color = AccentSoft,
+    /** 悬停/按下底：列表行的过渡态，不参与状态表达 */
+    val Hover: Color = Surface3,
+    /** 星标黄：收藏、星标。唯一的暖色高饱和，用面积极小 */
+    val Star: Color = Color(0xFFFFD166),
+    /** 点缀粉：只给收藏/成就/角色提示，删除永远用 Danger */
+    val AccentPink: Color = Color(0xFFFF7EB6),
+    /** 霓虹青：进度渐变终点、深色下选中态的微光 */
+    val Neon: Color = Color(0xFF4DE1FF),
+    /** 发光色。浅色模式下为全透明，深色下才让选中/进度轻微外发光 */
+    val Glow: Color = Color(0x00000000),
+    /** 成功色的文字版：Success 本身太亮，直接当正文读不清 */
+    val SuccessText: Color = Success
 )
 
 val DarkPalette = SunPalette(
@@ -115,7 +133,14 @@ val DarkPalette = SunPalette(
     OnTopBar = Color(0xFFF5F6F8),
     OnTopBarMuted = Color(0xFF9DA1A7),
     // 深灰底上用近黑细线：两栏一眼分开，不靠彩色
-    PaneDivider = Color(0xFF101010)
+    PaneDivider = Color(0xFF101010),
+    Selected = Color(0x334A90F7),
+    Hover = Color(0xFF454547),
+    Star = Color(0xFFE3B341),
+    AccentPink = Color(0xFFFF7EB6),
+    Neon = Color(0xFF4DE1FF),
+    Glow = Color(0x00000000),
+    SuccessText = Color(0xFF3FB950)
 )
 
 val LightPalette = SunPalette(
@@ -150,83 +175,113 @@ val LightPalette = SunPalette(
     OnTopBar = Color(0xFFF5F6F8),
     OnTopBarMuted = Color(0xFFB9BCC1),
     // 近白画布上的深色切割线，秩序感来自这条线本身
-    PaneDivider = Color(0xFF2B2B2B)
+    PaneDivider = Color(0xFF2B2B2B),
+    Selected = Color(0x1F1565D8),
+    Hover = Color(0xFFF2F3F5),
+    Star = Color(0xFFC98A00),
+    AccentPink = Color(0xFFD64C8C),
+    Neon = Color(0xFF1E9BC4),
+    Glow = Color(0x00000000),
+    SuccessText = Color(0xFF1A7F37)
 )
 
 
 /**
- * 二次元色板。
+ * 二次元蓝系色板（浅色，默认）。
  *
- * 关键是「半透明」：所有面颜色留 15%–25% 的透明度，让壁纸从面板底下透出来，
- * 形成玻璃卡片浮在插画上的层次。透明度压太狠会失去可读性，所以文字色
- * 单独提到接近纯白/纯黑，并且默认叠一层暗化遮罩来兜底对比度。
+ * 这是「工具型高密度界面」的底子：70% 冷中性（#F6F9FE / #EEF4FC / #FFFFFF），
+ * 20% 蓝（#3B82F6 只出现在按钮、选中、进度），10% 点缀（星标黄、点缀粉、危险红）。
+ *
+ * 和上一版最大的差别是**面不再半透明**。玻璃质感铺在文件列表上会直接
+ * 吃掉正文对比度 —— 列表是拿来扫读的，不是拿来当插画背景的。壁纸与插画
+ * 退到设置页、空状态、错误页这些"情绪区"去表达。
+ */
+val AnimeLight = SunPalette(
+    dark = false,
+    Bg = Color(0xE6F6F9FE),
+    Surface1 = Color(0xFFFFFFFF),
+    Surface2 = Color(0xF2EEF4FC),
+    Surface3 = Color(0xFFEDF5FF),
+    Surface4 = Color(0xFFFFFFFF),
+    Hairline = Color(0xFFD9E5F5),
+    TextPrimary = Color(0xFF25324A),
+    TextSecondary = Color(0xFF6F8099),
+    TextTertiary = Color(0xFF8A9BB3),
+    Accent = Color(0xFF3B82F6),
+    AccentSoft = Color(0xFFE3F0FF),
+    AccentLine = Color(0xFFBBD6F8),
+    Folder = Color(0xFF4A90E2),
+    File = Color(0xFF7B8CA6),
+    Danger = Color(0xFFFF5C7A),
+    Success = Color(0xFF3DDC97),
+    Warning = Color(0xFFB26A00),
+    Scrim = Color(0x660B1220),
+    CodeKeyword = Color(0xFF2F6FED),
+    CodeString = Color(0xFF0A8055),
+    CodeComment = Color(0xFF8A9BB3),
+    CodeNumber = Color(0xFFB26A00),
+    CodeAnnotation = Color(0xFF0E7490),
+    CodeTag = Color(0xFF7C4DFF),
+    TopBar = Color(0xF2EEF4FC),
+    OnTopBar = Color(0xFF17233D),
+    OnTopBarMuted = Color(0xFF6F8099),
+    PaneDivider = Color(0xFFD9E5F5),
+    TopBarGradientStart = Color(0xF2EEF4FC),
+    TopBarGradientEnd = Color(0xE6F6F9FE),
+    Selected = Color(0xFFE3F0FF),
+    Hover = Color(0xFFEDF5FF),
+    Star = Color(0xFFFFD166),
+    AccentPink = Color(0xFFFF7EB6),
+    Neon = Color(0xFF4DE1FF),
+    Glow = Color(0x00000000),
+    SuccessText = Color(0xFF0A8055)
+)
+
+/**
+ * 二次元蓝系色板（深色）。
+ *
+ * 藏蓝底 #0B1220 打底，面板靠 1%–2% 的明度差分层。只有选中态、进度条、
+ * 当前路径允许发光，而且是很克制的 12px 外扩 —— 列表行一律不发光。
  */
 val AnimeDark = SunPalette(
     dark = true,
-    Bg = Color(0x8C140F1F),
-    Surface1 = Color(0xA61C1629),
-    Surface2 = Color(0xB8231B33),
-    Surface3 = Color(0xCC2B2140),
-    Surface4 = Color(0xE633274D),
-    Hairline = Color(0x33FFD6E8),
-    TextPrimary = Color(0xFFFBF3FF),
-    TextSecondary = Color(0xFFCDBFE0),
-    TextTertiary = Color(0xFF9D8FB8),
-    Accent = Color(0xFFFF7EB6),
-    AccentSoft = Color(0x45FF7EB6),
-    AccentLine = Color(0x8CFF7EB6),
-    Folder = Color(0xFFFFC978),
-    File = Color(0xFFA294C0),
-    Danger = Color(0xFFFF6B8A),
-    Success = Color(0xFF6FE3B8),
-    Warning = Color(0xFFFFD36E),
-    Scrim = Color(0xB3000000),
-    CodeKeyword = Color(0xFFFF9ED2),
-    CodeString = Color(0xFF9EE6C8),
-    CodeComment = Color(0xFF8A7CA6),
-    CodeNumber = Color(0xFFFFC978),
-    CodeAnnotation = Color(0xFF9BD8FF),
-    CodeTag = Color(0xFFB9A6FF),
-    TopBar = Color(0x99100B18),
-    OnTopBar = Color(0xFFFDF6FF),
-    OnTopBarMuted = Color(0xFFC3B4D6),
-    PaneDivider = Color(0x40FF7EB6),
-    TopBarGradientStart = Color(0xCC2C1B44),
-    TopBarGradientEnd = Color(0xB3100B18)
-)
-
-val AnimeLight = SunPalette(
-    dark = false,
-    Bg = Color(0xB8FFF6FB),
-    Surface1 = Color(0xCCFFFFFF),
-    Surface2 = Color(0xD9FDF1F8),
-    Surface3 = Color(0xE6F7E6F2),
-    Surface4 = Color(0xFFFFFFFF),
-    Hairline = Color(0x269B6F92),
-    TextPrimary = Color(0xFF2A1F35),
-    TextSecondary = Color(0xFF5F4E70),
-    TextTertiary = Color(0xFF95859F),
-    Accent = Color(0xFFE2558F),
-    AccentSoft = Color(0x2EE2558F),
-    AccentLine = Color(0xFFF3B8D0),
-    Folder = Color(0xFFE89B3C),
-    File = Color(0xFF7C6B90),
-    Danger = Color(0xFFD63E5C),
-    Success = Color(0xFF1F9E76),
-    Warning = Color(0xFFB87B12),
-    Scrim = Color(0x66000000),
-    CodeKeyword = Color(0xFFC2185B),
-    CodeString = Color(0xFF2E7D5B),
-    CodeComment = Color(0xFF9C8CA8),
-    CodeNumber = Color(0xFFB26A00),
-    CodeAnnotation = Color(0xFF3B6FD4),
-    CodeTag = Color(0xFFD13B6B),
-    TopBar = Color(0xC7F7E9F3),
-    OnTopBar = Color(0xFF2A1F35),
-    OnTopBarMuted = Color(0xFF6B5878),
-    PaneDivider = Color(0x40E2558F),
-    TopBarGradientStart = Color(0xE6FFE3F3),
-    TopBarGradientEnd = Color(0xCCEFE3FF)
+    Bg = Color(0xF50B1220),
+    Surface1 = Color(0xFF152036),
+    Surface2 = Color(0xFA111B2E),
+    Surface3 = Color(0xFF1B2A44),
+    Surface4 = Color(0xFF17233A),
+    Hairline = Color(0x2E5DA9FF),
+    TextPrimary = Color(0xFFEAF2FF),
+    TextSecondary = Color(0xFF9FB3D1),
+    TextTertiary = Color(0xFF7A8CA8),
+    Accent = Color(0xFF5DA9FF),
+    AccentSoft = Color(0x1F4DE1FF),
+    AccentLine = Color(0x5C4DE1FF),
+    Folder = Color(0xFF6FB0F5),
+    File = Color(0xFF8FA3BE),
+    Danger = Color(0xFFFF5C7A),
+    Success = Color(0xFF3DDC97),
+    Warning = Color(0xFFFFC24D),
+    Scrim = Color(0xCC000000),
+    CodeKeyword = Color(0xFF7FB4FF),
+    CodeString = Color(0xFF5FE3B0),
+    CodeComment = Color(0xFF6B7F9C),
+    CodeNumber = Color(0xFFFFC24D),
+    CodeAnnotation = Color(0xFF4DE1FF),
+    CodeTag = Color(0xFFB79CFF),
+    TopBar = Color(0xFA0E1727),
+    OnTopBar = Color(0xFFEAF2FF),
+    OnTopBarMuted = Color(0xFF9FB3D1),
+    PaneDivider = Color(0x2E5DA9FF),
+    TopBarGradientStart = Color(0xFA0E1727),
+    TopBarGradientEnd = Color(0xF50B1220),
+    Selected = Color(0x1F4DE1FF),
+    Hover = Color(0xFF1B2A44),
+    Star = Color(0xFFFFD166),
+    AccentPink = Color(0xFFFF7EB6),
+    Neon = Color(0xFF4DE1FF),
+    Glow = Color(0x404DE1FF),
+    SuccessText = Color(0xFF3DDC97)
 )
 
 private val LocalSunPalette = staticCompositionLocalOf { DarkPalette }
@@ -374,7 +429,7 @@ fun SunDocumentTheme(
     val skin = remember(skinId) { Skins.byId(skinId) }
     // 先绑定模板，再渲染子树：任何一处读 SunShapes / Mt 都是新值
     SkinHolder.spec = skin
-    // 二次元模板有自己的一套半透明色板，其余模板共用中性色板
+    // 二次元模板有自己的一套蓝系色板，其余模板共用中性色板
     val base = when {
         skin.anime -> if (dark) AnimeDark else AnimeLight
         dark -> DarkPalette
@@ -386,7 +441,9 @@ fun SunDocumentTheme(
         base.copy(
             Accent = c,
             AccentSoft = c.copy(alpha = if (dark) 0.20f else 0.12f),
-            AccentLine = c.copy(alpha = if (dark) 0.55f else 0.35f)
+            AccentLine = c.copy(alpha = if (dark) 0.55f else 0.35f),
+            // 选中底跟着强调色走一层，但不能浓到盖住文件名
+            Selected = c.copy(alpha = if (dark) 0.18f else 0.14f)
         )
     } else base
     val scheme = if (dark) {

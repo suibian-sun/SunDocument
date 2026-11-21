@@ -20,6 +20,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -160,6 +161,8 @@ import com.suibian.sunfile.data.NetworkMount
 import com.suibian.sunfile.data.LocalMount
 import com.suibian.sunfile.data.DEFAULT_GROUP
 import com.suibian.sunfile.ui.components.DrawCheck
+import com.suibian.sunfile.ui.components.EmptyArt
+import com.suibian.sunfile.ui.components.EmptyMood
 import com.suibian.sunfile.ui.components.FolderDotsIcon
 import com.suibian.sunfile.ui.components.HamburgerIcon
 import com.suibian.sunfile.ui.components.MaterialFileIcon
@@ -1955,6 +1958,7 @@ private fun TopBar(
     onToggleBookmark: (String) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val barHairline = SunColors.Hairline
     Row(
         Modifier
             .fillMaxWidth()
@@ -1967,6 +1971,13 @@ private fun TopBar(
             // 底色先铺满，再让状态栏高度算进栏内 —— 顶栏颜色一直延伸到屏幕最上沿
             .statusBarsPadding()
             .height(Mt.BarHeight)
+            // 顶栏与列表之间一条 hairline：浅色顶栏和白卡片只有 2% 明度差，
+            // 没有这条线的话内容会像从栏里漏出来
+            .drawBehind {
+                val t = 0.6.dp.toPx()
+                val y = size.height - t / 2f
+                drawLine(barHairline, Offset(0f, y), Offset(size.width, y), t)
+            }
             .padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -2210,17 +2221,14 @@ private fun PaneView(
     onUp: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    // 没有分割线：聚焦的一栏抬到 Surface1，另一栏留在底色上或压到 Surface2，
-    // 两栏之间靠明度差与边缘光分开，看起来像前后两个平面而不是一张纸上的两格。
+    // 聚焦的一栏用卡片白铺实，另一栏退回页面底色。
+    // 列表必须是实心的：壁纸从行与行之间透出来，正文对比度会直接塌掉。
     val dark = SunColors.dark
-    // 二次元模板下栏本身不再铺一层：底色已经半透明，再叠一次会把壁纸彻底盖死
-    val paneLetsWallpaperThrough = SunSkin.anime
     val bg by animateColorAsState(
         targetValue = when {
-            paneLetsWallpaperThrough -> Color.Transparent
             active -> SunColors.Surface1
             dark -> Color.Transparent
-            else -> SunColors.Surface2
+            else -> SunColors.Bg
         },
         animationSpec = tween(Motion.Slow, easing = Motion.EaseOut),
         label = "paneBg"
@@ -2235,38 +2243,26 @@ private fun PaneView(
         modifier
             .fillMaxHeight()
             .background(bg)
-            // 边缘高光 + 内侧微阴影：给聚焦栏做出「被托起来」的厚度
+            // 边缘高光：深色下靠一层极淡的白光给聚焦栏做出厚度；
+            // 浅色下不画阴影 —— 白卡片上的黑色渐变会显脏，靠色差已经够分开
             .drawBehind {
-                if (!active) return@drawBehind
+                if (!active || !dark) return@drawBehind
                 val edge = 3.dp.toPx()
-                if (dark) {
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(Color(0x16FFFFFF), Color.Transparent), 0f, edge
-                        )
+                drawRect(
+                    Brush.horizontalGradient(
+                        listOf(Color(0x16FFFFFF), Color.Transparent), 0f, edge
                     )
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color(0x16FFFFFF)), size.width - edge, size.width
-                        )
+                )
+                drawRect(
+                    Brush.horizontalGradient(
+                        listOf(Color.Transparent, Color(0x16FFFFFF)), size.width - edge, size.width
                     )
-                    drawRect(
-                        Brush.verticalGradient(
-                            listOf(Color(0x12FFFFFF), Color.Transparent), 0f, 2.dp.toPx()
-                        )
+                )
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color(0x12FFFFFF), Color.Transparent), 0f, 2.dp.toPx()
                     )
-                } else {
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(Color(0x0F000000), Color.Transparent), 0f, edge
-                        )
-                    )
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color(0x0F000000)), size.width - edge, size.width
-                        )
-                    )
-                }
+                )
             }
             // 手指进入或按下即聚焦该栏，不消费事件，子项点击照常
             .pointerInput(index) {
@@ -2389,9 +2385,9 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface4, modifier = Modifier.size(38.dp))
-                Spacer(Modifier.height(8.dp))
-                Text("无法读取", color = SunColors.TextSecondary, fontSize = 12.sp)
+                EmptyArt(EmptyMood.ERROR, size = 74.dp)
+                Spacer(Modifier.height(10.dp))
+                Text("无法读取", color = SunColors.TextPrimary, fontSize = 13.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     pane.notice ?: "",
@@ -2457,7 +2453,9 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("打开失败", color = SunColors.TextSecondary, fontSize = 13.5.sp)
+                EmptyArt(EmptyMood.ERROR, size = 72.dp)
+                Spacer(Modifier.height(10.dp))
+                Text("打开失败", color = SunColors.TextPrimary, fontSize = 13.5.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     pane.error ?: "",
@@ -2483,9 +2481,15 @@ private fun PaneList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Outlined.Folder, null, tint = SunColors.Surface3, modifier = Modifier.size(40.dp))
-                Spacer(Modifier.height(10.dp))
-                Text("空", color = SunColors.TextTertiary, fontSize = 12.5.sp)
+                EmptyArt(EmptyMood.FOLDER, size = 88.dp)
+                Spacer(Modifier.height(12.dp))
+                Text("这个文件夹是空的", color = SunColors.TextPrimary, fontSize = 13.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "点底栏的「新建」放点东西进来",
+                    color = SunColors.TextTertiary,
+                    fontSize = 11.sp
+                )
             }
 
             else -> LazyColumn(
@@ -2569,14 +2573,15 @@ private fun FileRow(
     val skin = SunSkin
     val hairline = SunColors.Hairline
     val accent = SunColors.Accent
+    val isDark = SunColors.dark
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     var rowOrigin by remember { mutableStateOf(Offset.Zero) }
     val bg by animateColorAsState(
         targetValue = when {
-            selected -> SunColors.AccentSoft
+            selected -> SunColors.Selected
             // 高亮模板不扩散水波纹，按压时整行压暗一层，更接近像素级管理器的手感
-            skin.press == PressMode.TINT && pressed -> SunColors.Surface3
+            skin.press == PressMode.TINT && pressed -> SunColors.Hover
             else -> Color.Transparent
         },
         animationSpec = tween(Motion.Fast),
@@ -2614,6 +2619,21 @@ private fun FileRow(
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2f)
                     )
                 }
+                // 多选态：浅蓝底 + 一圈主蓝描边。不用整行高饱和蓝，
+                // 否则一屏选中十几个文件会亮成一块灯牌
+                if (selected && !skin.selectionBar) {
+                    val inset = 0.5.dp.toPx()
+                    drawRoundRect(
+                        color = accent.copy(alpha = if (isDark) 0.55f else 0.42f),
+                        topLeft = Offset(inset, inset),
+                        size = androidx.compose.ui.geometry.Size(
+                            size.width - inset * 2,
+                            size.height - inset * 2
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())
+                    )
+                }
             }
             .onGloballyPositioned { coords ->
                 val pos = coords.localToRoot(Offset.Zero)
@@ -2640,7 +2660,8 @@ private fun FileRow(
             Text(
                 entry.name,
                 color = when {
-                    selected -> SunColors.Accent
+                    // 选中行不换蓝字：浅蓝底上再压蓝字，对比度和可读性一起崩
+                    selected -> SunColors.TextPrimary
                     !entry.canRead -> SunColors.TextTertiary
                     else -> SunColors.TextPrimary
                 },
@@ -2660,7 +2681,7 @@ private fun FileRow(
                     // MT 的顺序：先时间后大小，扫一眼就能比出「什么时候、多大」
                     Fmt.timeAs(stamp, style.dateFormat) + " " + Fmt.sizeCompact(entry.size)
                 },
-                color = SunColors.TextTertiary,
+                color = SunColors.TextSecondary,
                 fontSize = skin.meta,
                 // 纸墨模板用等宽元信息：时间与大小按列对齐，扫读时不用逐字比长度
                 fontFamily = if (skin.metaMono) FontFamily.Monospace else FontFamily.Default,
@@ -2866,6 +2887,9 @@ private fun BarIcon(
         Modifier
             .size(46.dp)
             .clip(CircleShape)
+            // 激活项（如过滤开关）给一层浅蓝底：底栏没有"当前页"概念，
+            // 但用户需要一眼看出哪个开关是开的
+            .background(if (active) SunColors.Selected else Color.Transparent)
             .pressScale(interaction, 0.86f)
             .combinedClickable(
                 interactionSource = interaction,
@@ -2892,31 +2916,63 @@ private fun BusyBar(op: com.suibian.sunfile.vm.OpState, modifier: Modifier = Mod
     Surface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
         color = SunColors.Surface4,
-        shape = SunShapes.Medium
+        shape = SunShapes.Medium,
+        border = androidx.compose.foundation.BorderStroke(1.dp, SunColors.Hairline)
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(op.title, color = SunColors.TextPrimary, fontSize = 11.5.sp)
-                Text("${(op.progress * 100).toInt()}%", color = SunColors.Accent, style = NumberStyle)
+                Text(
+                    "${(op.progress * 100).toInt()}%",
+                    color = if (op.progress >= 1f) SunColors.SuccessText else SunColors.Accent,
+                    style = NumberStyle
+                )
             }
             Spacer(Modifier.height(7.dp))
-            LinearProgressIndicator(
-                progress = { op.progress },
-                modifier = Modifier.fillMaxWidth().height(4.dp),
-                color = SunColors.Accent,
-                trackColor = SunColors.Surface2
+            // 蓝到霓虹青的渐变只在这条 4dp 高的条上出现；
+            // 完成转绿，颜色在这里承担语义，不是装饰
+            GradientBar(
+                progress = op.progress,
+                done = op.progress >= 1f,
+                modifier = Modifier.fillMaxWidth().height(4.dp)
             )
             if (op.currentFile.isNotEmpty()) {
                 Spacer(Modifier.height(5.dp))
                 Text(
                     op.currentFile,
-                    color = SunColors.TextTertiary,
+                    color = SunColors.TextSecondary,
                     fontSize = 9.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
+    }
+}
+
+/** 传输进度条：渐变填充 + 轨道，完成时整条转绿 */
+@Composable
+private fun GradientBar(progress: Float, done: Boolean, modifier: Modifier = Modifier) {
+    val p = progress.coerceIn(0f, 1f)
+    val track = SunColors.Surface2
+    val accent = SunColors.Accent
+    val neon = SunColors.Neon
+    val success = SunColors.Success
+    Canvas(modifier) {
+        val h = size.height
+        val r = androidx.compose.ui.geometry.CornerRadius(h / 2f)
+        drawRoundRect(track, size = size, cornerRadius = r)
+        if (p <= 0.001f) return@Canvas
+        val brush = if (done) {
+            Brush.horizontalGradient(listOf(success, success))
+        } else {
+            Brush.horizontalGradient(listOf(accent, neon))
+        }
+        drawRoundRect(
+            brush,
+            size = androidx.compose.ui.geometry.Size(size.width * p, h),
+            cornerRadius = r
+        )
     }
 }
 

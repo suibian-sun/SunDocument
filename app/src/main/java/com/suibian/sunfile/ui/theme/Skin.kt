@@ -90,13 +90,15 @@ data class SkinSpec(
 object Skins {
 
     /**
-     * 二次元：玻璃面板 + 大圆角 + 粉色强调。
-     * 面颜色带透明度，壁纸从底层透出；文字对比度由全局暗化遮罩保证。
+     * 二次元（默认）：蓝系工具界面。
+     *
+     * 信息区按高密度工具做（白卡片、54dp 行高、内缩细线），
+     * 二次元的情绪全部退到空状态插画、设置页头图和图标描边里。
      */
     val Anime = SkinSpec(
         id = "anime",
         name = "二次元",
-        note = "半透明玻璃 · 大圆角 · 粉紫强调",
+        note = "蓝系 · 白卡片 · 内缩细线",
         dialog = RoundedCornerShape(18.dp),
         small = RoundedCornerShape(12.dp),
         medium = RoundedCornerShape(18.dp),
@@ -113,7 +115,7 @@ object Skins {
         barMeta = 10.5.sp,
         nameSize = 14.5.sp,
         meta = 10.sp,
-        divider = DividerMode.NONE,
+        divider = DividerMode.INSET,
         press = PressMode.TINT,
         surface = SurfaceMode.CARD,
         iconTint = IconTintMode.TYPE,

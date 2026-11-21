@@ -62,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
@@ -195,12 +196,13 @@ fun SidebarContent(
                 Modifier
                     .size(26.dp)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(SunColors.OnTopBar.copy(alpha = 0.10f), RoundedCornerShape(7.dp)),
+                    // 唯一的品牌色块：主蓝底 + 白字，是整条侧栏里唯一允许的实心蓝
+                    .background(SunColors.Accent, RoundedCornerShape(7.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     "S",
-                    color = SunColors.OnTopBar,
+                    color = Color.White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -369,6 +371,7 @@ private fun LocalRow(
     onRemove: (() -> Unit)?
 ) {
     val tint = if (active) SunColors.OnTopBar else SunColors.OnTopBar.copy(alpha = 0.86f)
+    val activeAccent = SunColors.Accent
     var menu by remember { mutableStateOf(false) }
 
     Column(
@@ -376,10 +379,19 @@ private fun LocalRow(
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(RoundedCornerShape(8.dp))
-            .then(
-                if (active) Modifier.background(SunColors.OnTopBar.copy(alpha = 0.07f))
-                else Modifier
-            )
+            // 选中项：浅蓝底 + 左侧 3px 指示条。侧栏用底而不是纯字色表达当前项，
+            // 眼睛扫下来先看到色块，再确认名字，比只加粗快一拍
+            .background(if (active) SunColors.Selected else Color.Transparent)
+            .drawBehind {
+                if (!active) return@drawBehind
+                val w = 3.dp.toPx()
+                drawRoundRect(
+                    color = activeAccent,
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height * 0.15f),
+                    size = androidx.compose.ui.geometry.Size(w, size.height * 0.70f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2f)
+                )
+            }
             .clickable { onClick() }
             .padding(start = 8.dp, end = 8.dp, top = 7.dp, bottom = 8.dp)
     ) {
@@ -432,8 +444,9 @@ private fun LocalRow(
         if (showUsage && info != null && info.total > 0) {
             val used = info.total - info.available
             val ratio = (used.toFloat() / info.total).coerceIn(0f, 1f)
-            val track = Color.White.copy(alpha = 0.10f)
-            val bar = SunColors.OnTopBar.copy(alpha = 0.55f)
+            // 容量条：轨道用 hairline，填充用主蓝。侧栏里它是唯一允许用彩色面积的地方
+            val track = SunColors.Hairline
+            val bar = SunColors.Accent
             Canvas(
                 Modifier
                     .fillMaxWidth()
@@ -531,6 +544,7 @@ private fun NetworkRow(net: NetworkMount, onClick: () -> Unit, onRemove: () -> U
 
 @Composable
 private fun BookmarkRow(path: String, active: Boolean, onClick: () -> Unit) {
+    val activeAccent = SunColors.Accent
     Text(
         path.substringAfterLast('/').ifBlank { path },
         color = if (active) SunColors.OnTopBar else SunColors.OnTopBar.copy(alpha = 0.78f),
@@ -541,6 +555,17 @@ private fun BookmarkRow(path: String, active: Boolean, onClick: () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(RoundedCornerShape(7.dp))
+            .background(if (active) SunColors.Selected else Color.Transparent)
+            .drawBehind {
+                if (!active) return@drawBehind
+                val w = 3.dp.toPx()
+                drawRoundRect(
+                    color = activeAccent,
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height * 0.15f),
+                    size = Size(w, size.height * 0.70f),
+                    cornerRadius = CornerRadius(w / 2f)
+                )
+            }
             .clickable { onClick() }
             .padding(start = 32.dp, end = 12.dp, top = 7.dp, bottom = 7.dp)
     )

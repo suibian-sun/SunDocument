@@ -322,11 +322,22 @@ fun SearchDialog(
 
                     Spacer(Modifier.height(6.dp))
 
-                    // ---------- 输入框 + 下箭头 ----------
-                    val lineColor =
-                        if (state.query.isNotEmpty()) SunColors.Accent else SunColors.TextTertiary.copy(alpha = 0.5f)
+                    // ---------- 输入框：白底圆角框，有内容时描边转主蓝 ----------
+                    val focused = state.query.isNotEmpty()
                     Column(Modifier.fillMaxWidth()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SunColors.Surface1)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (focused) SunColors.Accent else SunColors.Hairline,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .padding(start = 12.dp, end = 4.dp)
+                        ) {
                             BasicTextField(
                                 value = state.query,
                                 onValueChange = onQueryChange,
@@ -335,7 +346,19 @@ fun SearchDialog(
                                 cursorBrush = SolidColor(SunColors.Accent),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                                modifier = Modifier.weight(1f).padding(vertical = 7.dp)
+                                modifier = Modifier.weight(1f).padding(vertical = 7.dp),
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (state.query.isEmpty()) {
+                                            Text(
+                                                "搜索文件名或内容",
+                                                color = SunColors.TextTertiary,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                        inner()
+                                    }
+                                }
                             )
                             // 收藏当前关键词
                             val starred = favorites.contains(state.query.trim())
@@ -369,7 +392,6 @@ fun SearchDialog(
                                 )
                             }
                         }
-                        Spacer(Modifier.height(1.dp).fillMaxWidth().background(lineColor))
                     }
 
                     if (historyOpen) {
@@ -624,17 +646,38 @@ fun SearchDialog(
 
 @Composable
 private fun ContentInput(value: String, onChange: (String) -> Unit, onDone: () -> Unit) {
-    BasicTextField(
-        value = value,
-        onValueChange = onChange,
-        singleLine = true,
-        textStyle = TextStyle(color = SunColors.TextPrimary, fontSize = 13.sp),
-        cursorBrush = SolidColor(SunColors.Accent),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { onDone() }),
-        modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp)
-    )
-    Spacer(Modifier.height(1.dp).fillMaxWidth().background(SunColors.Hairline))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SunColors.Surface1)
+            .border(
+                width = 1.dp,
+                color = if (value.isNotEmpty()) SunColors.Accent else SunColors.Hairline,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = TextStyle(color = SunColors.TextPrimary, fontSize = 13.sp),
+            cursorBrush = SolidColor(SunColors.Accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            modifier = Modifier.fillMaxWidth(),
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) {
+                        Text("在文件内容里查找…", color = SunColors.TextTertiary, fontSize = 13.sp)
+                    }
+                    inner()
+                }
+            }
+        )
+    }
 }
 
 /** 两行式过滤项：标题在上、当前取值在下，点开是预设菜单 */

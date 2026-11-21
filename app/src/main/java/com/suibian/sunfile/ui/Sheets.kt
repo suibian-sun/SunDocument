@@ -447,8 +447,10 @@ fun BookmarkSheet(
                         Spacer(Modifier.width(12.dp))
                         Text(
                             p,
-                            color = if (p == current) SunColors.Accent else SunColors.TextPrimary,
+                            // 当前路径靠字重和正文色强调，不再用蓝字：白底蓝字只有 3.4:1
+                            color = if (p == current) SunColors.TextPrimary else SunColors.TextSecondary,
                             fontSize = 11.sp,
+                            fontWeight = if (p == current) FontWeight.Medium else FontWeight.Normal,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -940,8 +942,11 @@ fun DeleteDialog(
             TextButton(onClick = { onConfirm(toTrash) }) {
                 Text(
                     if (toTrash) "移到回收站" else "永久删除",
-                    color = if (toTrash) SunColors.Accent else SunColors.Danger,
-                    fontSize = 13.sp
+                    // 删除就是删除，即使进的是回收站：红色只留给这一类操作，
+                    // 蓝留给「取消/次要」，用户不用为同一个动作记两套颜色
+                    color = SunColors.Danger,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
         },

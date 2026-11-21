@@ -131,6 +131,8 @@ fun SettingsPage(
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
 
+            SettingsHero(BuildConfig.VERSION_NAME)
+
             // ---------------- 启动 ----------------
             Category("启动")
             ActionRow(
@@ -491,6 +493,112 @@ private fun Category(text: String) {
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 6.dp)
     )
+}
+
+/**
+ * 设置页头图。
+ *
+ * 整份界面里唯一允许"有情绪"的地方：一块极淡的蓝到青渐变，一页翻角的纸，
+ * 两颗星。它下面就是密集的设置项，所以装饰必须让路 —— 渐变透明度压到
+ * 16% 以下，星星放在右侧空白处，不压在任何文字上。
+ */
+@Composable
+private fun SettingsHero(version: String) {
+    val accent = SunColors.Accent
+    val neon = SunColors.Neon
+    val star = SunColors.Star
+    val pink = SunColors.AccentPink
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 2.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(accent.copy(alpha = 0.15f), neon.copy(alpha = 0.06f))
+                )
+            )
+            .padding(horizontal = 15.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(44.dp)) {
+            val w = size.width
+            val h = size.height
+            drawRoundRect(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(accent, neon)),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.27f)
+            )
+            // 一页翻角的纸：和列表里的文件图标同一套语言
+            val paper = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.30f, h * 0.25f)
+                lineTo(w * 0.60f, h * 0.25f)
+                lineTo(w * 0.71f, h * 0.37f)
+                lineTo(w * 0.71f, h * 0.75f)
+                lineTo(w * 0.30f, h * 0.75f)
+                close()
+            }
+            drawPath(paper, Color.White.copy(alpha = 0.95f))
+            drawPath(
+                androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * 0.60f, h * 0.25f)
+                    lineTo(w * 0.60f, h * 0.37f)
+                    lineTo(w * 0.71f, h * 0.37f)
+                    close()
+                },
+                accent.copy(alpha = 0.40f)
+            )
+            val line = w * 0.018f
+            for (i in 0..1) {
+                val y = h * (0.50f + i * 0.13f)
+                drawLine(
+                    color = accent.copy(alpha = 0.55f),
+                    start = androidx.compose.ui.geometry.Offset(w * 0.38f, y),
+                    end = androidx.compose.ui.geometry.Offset(w * (if (i == 0) 0.63f else 0.54f), y),
+                    strokeWidth = line,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            }
+        }
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "SunDocument",
+                color = SunColors.TextPrimary,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "v$version · 蓝系工具界面",
+                color = SunColors.TextSecondary,
+                fontSize = 10.5.sp
+            )
+        }
+        // 两颗星只占右侧空白，不压文字
+        androidx.compose.foundation.Canvas(Modifier.size(40.dp)) {
+            fun spark(cx: Float, cy: Float, r: Float, c: Color) {
+                val inner = r * 0.26f
+                drawPath(
+                    androidx.compose.ui.graphics.Path().apply {
+                        moveTo(cx, cy - r)
+                        quadraticBezierTo(cx + inner, cy - inner, cx + r, cy)
+                        quadraticBezierTo(cx + inner, cy + inner, cx, cy + r)
+                        quadraticBezierTo(cx - inner, cy + inner, cx - r, cy)
+                        quadraticBezierTo(cx - inner, cy - inner, cx, cy - r)
+                        close()
+                    },
+                    c
+                )
+            }
+            spark(size.width * 0.62f, size.height * 0.38f, size.width * 0.17f, star)
+            spark(size.width * 0.34f, size.height * 0.66f, size.width * 0.09f, pink.copy(alpha = 0.9f))
+            drawCircle(
+                neon.copy(alpha = 0.6f),
+                size.width * 0.03f,
+                androidx.compose.ui.geometry.Offset(size.width * 0.80f, size.height * 0.70f)
+            )
+        }
+    }
 }
 
 @Composable

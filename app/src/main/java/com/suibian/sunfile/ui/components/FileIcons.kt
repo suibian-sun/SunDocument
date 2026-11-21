@@ -23,12 +23,14 @@ import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -77,59 +79,46 @@ fun tintOf(file: File, isDir: Boolean = file.isDirectory): Color {
     if (SunSkin.iconTint == IconTintMode.MONO) {
         return if (isDir) SunColors.TextSecondary else SunColors.File
     }
-    if (isDir) return SunColors.Folder
+    if (isDir) return folderColor()
     return extColor(FileKinds.extensionOf(file), FileKinds.kindOf(file))
 }
 
-/** 扩展名配色：尽量贴近各家语言/办公软件的识别色，扫一眼就能分清 */
-fun extColor(ext: String, kind: FileKind): Color = when (ext) {
-    "py", "pyw" -> Color(0xFF3E7CB1)
-    "js", "mjs", "cjs", "jsx" -> Color(0xFFB49A00)
-    "ts", "tsx" -> Color(0xFF2F74C0)
-    "java" -> Color(0xFFB54A3C)
-    "kt", "kts" -> Color(0xFF8C6BD6)
-    "html", "htm", "xhtml" -> Color(0xFFD2572F)
-    "css", "scss", "less" -> Color(0xFF2F6BD8)
-    "json", "json5" -> Color(0xFF7C8794)
-    "xml", "plist" -> Color(0xFF7C8FA0)
-    "md", "markdown" -> Color(0xFF6B7680)
-    "sh", "bash", "zsh", "fish" -> Color(0xFF3F8F52)
-    "go" -> Color(0xFF1F93B5)
-    "rs" -> Color(0xFFB07A5A)
-    "c", "h" -> Color(0xFF5A6FBF)
-    "cpp", "cc", "cxx", "hpp", "hxx" -> Color(0xFF4A5FA8)
-    "php" -> Color(0xFF6C63A8)
-    "rb" -> Color(0xFFB3423A)
-    "swift" -> Color(0xFFD2572F)
-    "sql" -> Color(0xFFC08420)
-    "yml", "yaml" -> Color(0xFFA8443C)
-    "gradle", "groovy" -> Color(0xFF3C7FA8)
-    "toml", "ini", "conf", "cfg", "properties" -> Color(0xFF6E7B88)
-    "smali" -> Color(0xFF8A8F98)
-    "lua" -> Color(0xFF4B4B96)
-    "dart" -> Color(0xFF2A8BC0)
-    "vue" -> Color(0xFF3FA37A)
-    "svelte" -> Color(0xFFC6502B)
-    "csv", "tsv" -> Color(0xFF3F8F52)
-    "doc", "docx", "docm", "rtf", "odt", "wps", "pages" -> Color(0xFF2B579A)
-    "xls", "xlsx", "xlsm", "ods", "et", "numbers" -> Color(0xFF217346)
-    "ppt", "pptx", "pptm", "odp", "dps", "key" -> Color(0xFFC4492B)
-    "zip", "jar", "aar", "war", "ear", "whl", "epub", "xapk", "apks" -> Color(0xFFC08A24)
-    "rar" -> Color(0xFF9B5BB5)
-    "7z" -> Color(0xFF3D8B8B)
-    "tar", "gz", "tgz", "bz2", "xz", "zst" -> Color(0xFFA87A3C)
-    "apk" -> Color(0xFF3FB950)
-    "pdf" -> Color(0xFFD34B43)
-    else -> when (kind) {
-        FileKind.IMAGE -> Color(0xFF5AA3D6)
-        FileKind.AUDIO -> Color(0xFF9B78D4)
-        FileKind.VIDEO -> Color(0xFFCE7B4F)
-        FileKind.TEXT -> Color(0xFF7E8895)
-        FileKind.ARCHIVE -> Color(0xFFC08A24)
-        FileKind.OFFICE -> Color(0xFF2B579A)
-        FileKind.APK -> Color(0xFF3FB950)
-        FileKind.PDF -> Color(0xFFD34B43)
-        else -> Color(0xFF75808C)
+/** 文件夹主色：蓝系里唯一带一点紫的色，用来和图片、文档拉开距离 */
+@Composable
+@ReadOnlyComposable
+fun folderColor(): Color = if (SunColors.dark) Color(0xFF6FB0F5) else Color(0xFF4A90E2)
+
+/** 文件夹渐变的另一端：只做轻微偏移，不做发光 */
+@Composable
+@ReadOnlyComposable
+fun folderColorEnd(): Color = if (SunColors.dark) Color(0xFF9B8CFF) else Color(0xFF7C7CFF)
+
+/**
+ * 文件类型色。
+ *
+ * 全套蓝系、低饱和、只上图标与小标签。刻意不给每个扩展名一个颜色 ——
+ * 一屏几十行不同颜色撞在一起，文件管理器立刻变成廉价游戏。
+ */
+@Composable
+@ReadOnlyComposable
+fun extColor(ext: String, kind: FileKind): Color {
+    val dark = SunColors.dark
+    return when (kind) {
+        FileKind.DIR -> folderColor()
+        FileKind.IMAGE -> if (dark) Color(0xFF5CCBFB) else Color(0xFF38BDF8)
+        FileKind.VIDEO -> if (dark) Color(0xFFA396FF) else Color(0xFF8B7CFF)
+        FileKind.AUDIO -> if (dark) Color(0xFFFF9CC6) else Color(0xFFFF7EB6)
+        FileKind.ARCHIVE -> if (dark) Color(0xFFFFBC73) else Color(0xFFFFA94D)
+        // 安装包与未知类型共用中性蓝灰：它俩本来就不该抢注意力
+        FileKind.APK, FileKind.BINARY -> if (dark) Color(0xFF8FA3BE) else Color(0xFF7B8CA6)
+        // 代码走青色，普通文本走文档蓝：同一栏里一眼分得开，又不跳出蓝系
+        FileKind.TEXT -> if (ext in CODE_EXT) {
+            if (dark) Color(0xFF4FE0CE) else Color(0xFF2DD4BF)
+        } else {
+            if (dark) Color(0xFF6FA8F0) else Color(0xFF4C8FE0)
+        }
+        FileKind.OFFICE, FileKind.PDF ->
+            if (dark) Color(0xFF5D93FF) else Color(0xFF2F6FED)
     }
 }
 
@@ -227,17 +216,21 @@ private fun ThumbBadge(file: File, kind: FileKind, size: Dp, modifier: Modifier)
 }
 
 /**
- * 文件图标：MT 的底是「整块彩色圆角方」，上面压一张白纸，
- * 扩展名用底色写在纸上。方块比纸张更容易在密集列表里被眼睛抓住，
- * 颜色又能在不看文字时区分类型。
+ * 文件图标：淡色圆角方块打底，上面压一张纸，扩展名用类型色写在纸上。
+ *
+ * 底色只给 13%（深色 22%）的透明度，方块的存在感来自形状而不是颜色 ——
+ * 一屏几十个高饱和色块会把文件名彻底压住。
  */
 @Composable
 private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Modifier) {
+    val dark = SunColors.dark
+    // 深色下不能用白纸：白卡片夹在藏蓝列表里像一块没关的灯
+    val paper = if (dark) Color(0xFF101A2C) else Color.White
     Canvas(modifier) {
         val w = size.width
         val h = size.height
         drawRoundRect(
-            color = color,
+            color = color.copy(alpha = if (dark) 0.22f else 0.13f),
             cornerRadius = CornerRadius(w * 0.23f, w * 0.23f)
         )
 
@@ -255,8 +248,13 @@ private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Mo
             lineTo(left, bottom)
             close()
         }
-        drawPath(page, Color.White.copy(alpha = 0.95f))
-        // 折角：用底色透出来，像纸被翻起
+        drawPath(page, paper)
+        drawPath(
+            page,
+            color = color.copy(alpha = 0.22f),
+            style = Stroke(width = w * 0.014f, join = StrokeJoin.Round)
+        )
+        // 折角：用类型色透出来，像纸被翻起
         drawPath(
             Path().apply {
                 moveTo(right - fold, top)
@@ -264,7 +262,7 @@ private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Mo
                 lineTo(right, top + fold)
                 close()
             },
-            color.copy(alpha = 0.24f)
+            color.copy(alpha = 0.30f)
         )
 
         if (dotted) {
@@ -298,9 +296,10 @@ private fun PageBadge(label: String, color: Color, dotted: Boolean, modifier: Mo
     }
 }
 
-/** 实心文件夹：带一个浅色上层，比线性图标更接近 MT */
+/** 实心文件夹：蓝到紫的微渐变，比纯色更立体，但不做发光 */
 @Composable
-fun MtFolderIcon(modifier: Modifier = Modifier, tint: Color = SunColors.Folder) {
+fun MtFolderIcon(modifier: Modifier = Modifier, tint: Color = folderColor()) {
+    val tintEnd = folderColorEnd()
     Canvas(modifier) {
         val w = size.width
         val h = size.height
@@ -333,10 +332,17 @@ fun MtFolderIcon(modifier: Modifier = Modifier, tint: Color = SunColors.Folder) 
             quadraticBezierTo(w * 0.06f, h * 0.86f, w * 0.06f, h * 0.78f)
             close()
         }
-        drawPath(front, color = tint)
         drawPath(
             front,
-            color = Color.White.copy(alpha = 0.12f),
+            brush = Brush.verticalGradient(
+                listOf(tint, tintEnd),
+                startY = h * 0.33f,
+                endY = h * 0.86f
+            )
+        )
+        drawPath(
+            front,
+            color = Color.White.copy(alpha = 0.14f),
             style = Stroke(width = 0.6.dp.toPx(), join = StrokeJoin.Round)
         )
     }
